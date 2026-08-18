@@ -49,3 +49,8 @@ upx.exe
 
 # === 配置文件（含真实IP/网段，敏感，不提交）===
 config.ini
+
+# === 环境变量文件（含 GitHub Token，敏感，不提交）===
+.env
+# 但提交 .env.example 模板（脱敏，供参考）
+!.env.example

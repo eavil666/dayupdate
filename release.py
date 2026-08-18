@@ -4,8 +4,13 @@
 一键发布脚本 - 本地打包并上传到 GitHub Release
 
 使用方法:
-  1. 设置 GitHub Token 环境变量（仅需一次）:
-     setx GH_TOKEN "ghp_xxxxxxxxxxxxxxxxxxxx"
+  1. 配置 GitHub Token（任选一种）:
+     方式A: 复制 .env.example 为 .env，填入 Token
+        copy .env.example .env
+        notepad .env
+
+     方式B: 设置环境变量（重启终端生效）
+        setx GH_TOKEN "ghp_xxxxxxxxxxxxxxxxxxxx"
 
   2. 运行:
      python release.py                    # 自动从 main.py 读取版本号
@@ -13,8 +18,9 @@
      python release.py --skip-build       # 跳过打包，仅上传已有 exe
 
 注意:
+  - .env 文件不会被提交（已在 .gitignore 中），Token 安全
   - config.ini 不会被提交（已在 .gitignore 中）
-  - exe 文件不会被提交到 git（在 .gitignore 中），只上传到 Release
+  - exe 文件不会被提交到 git，只上传到 Release
   - 需要网络可访问 github.com
 """
 
@@ -50,13 +56,41 @@ def log_warn(msg):
     print(f'[*] {msg}')
 
 
+def load_env_file():
+    """从 .env 文件加载环境变量（不覆盖已存在的）"""
+    env_path = os.path.join(script_dir, '.env')
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            key, _, value = line.partition('=')
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
 def get_github_token():
-    """从环境变量获取 GitHub Token"""
+    """从环境变量或 .env 文件获取 GitHub Token"""
+    load_env_file()
     token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
     if not token:
-        log_err('未找到 GitHub Token，请先设置环境变量:')
-        print('    PowerShell: setx GH_TOKEN "ghp_xxxxxxxxxxxxxxxxxxxx"')
-        print('    或临时使用: $env:GH_TOKEN="ghp_xxx"')
+        log_err('未找到 GitHub Token，请按以下步骤配置:')
+        print('    方式1: 复制 .env.example 为 .env，填入 Token')
+        print('           copy .env.example .env')
+        print('           notepad .env')
+        print('    方式2: 设置环境变量（重启终端生效）')
+        print('           setx GH_TOKEN "ghp_xxxxxxxxxxxxxxxxxxxx"')
+        print('    方式3: 临时使用（仅当前终端）')
+        print('           $env:GH_TOKEN="ghp_xxx"')
+        print()
+        print('    Token 生成地址: https://github.com/settings/tokens')
+        print('    权限要求: 勾选 repo（完整仓库访问）')
         return None
     return token
 
