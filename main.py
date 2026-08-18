@@ -93,7 +93,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 & 自动更新 ================
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 # 版本信息来源：按优先级依次尝试
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
@@ -109,9 +109,28 @@ APP_VERSION = "1.2.1"
 #   "force_update": false
 # }
 # exe_urls 为数组时按顺序回退；也兼容 exe_url 单字符串格式
+# GitHub API：始终返回真实最新 release（无 CDN 缓存），作为首选版本源
+# 注意：未鉴权时 60 次/小时限频，桌面应用每次启动查一次足够
+GITHUB_API_LATEST = "https://api.github.com/repos/eavil666/dayupdate/releases/latest"
+
+# EXE 下载 CDN 镜像前缀（应用到 GitHub 直链前，按顺序回退）
+CDN_MIRROR_PREFIXES = [
+    "",  # GitHub 直链
+    "https://ghfast.top/",
+    "https://ghproxy.net/",
+    "https://gh-proxy.com/",
+    "https://mirror.ghproxy.com/",
+]
+
+# version.json 兜底源（GitHub API 失败时使用）
+# 注意：不要用 jsDelivr（cdn.jsdelivr.net）——它对 version.json 长缓存且忽略 ?t= 参数，
+# 会返回远古旧版本（实测缓存到 1.0.0），导致"一版一版升"或检测错乱
 UPDATE_VERSION_URLS = [
+    # raw 优先：缓存仅 5 分钟
     "https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
-    "https://cdn.jsdelivr.net/gh/eavil666/dayupdate@main/version.json",
+    # ghproxy/ghfast 镜像 raw：国内可达，无长缓存问题
+    "https://ghproxy.net/https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
+    "https://ghfast.top/https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
     # "http://intranet-server/apps/report/version.json",
     # r"\\file-server\share\report\version.json",
 ]
@@ -147,6 +166,47 @@ class AutoUpdater:
         self.ask_confirm_cb = ask_confirm_cb or (lambda msg: True)
         self._latest_info = None
 
+    def _fetch_latest_release_api(self):
+        """通过 GitHub API 获取最新 release（无 CDN 缓存，始终返回真实最新版）。
+
+        解决 jsDelivr 等对 version.json 长缓存导致的"一版一版升"问题：
+        国内 raw.githubusercontent.com 常不通，程序会降级到 jsDelivr，而 jsDelivr
+        缓存可能停留在远古版本（实测缓存到 1.0.0），导致检测到的"最新版"是旧版。
+        GitHub API 无此问题——每次请求都返回真实最新 release。
+
+        返回与 version.json 同结构的 dict；API 不提供 md5，下载时不做 MD5 校验
+        （requests 流式下载 + raise_for_status 已能捕获传输错误，足够可靠）。
+        """
+        import requests
+        try:
+            r = requests.get(GITHUB_API_LATEST, timeout=10,
+                             headers={'User-Agent': 'daily-report-updater'})
+            r.raise_for_status()
+            data = r.json()
+            tag = data.get('tag_name', '') or ''
+            version = tag.lstrip('vV').strip()
+            # 找到 .exe 资产
+            asset_url = None
+            for a in data.get('assets', []) or []:
+                if (a.get('name') or '').lower().endswith('.exe'):
+                    asset_url = a.get('browser_download_url')
+                    break
+            if not version or not asset_url:
+                return None
+            # 用 CDN 镜像前缀构造回退下载列表（直链在前，镜像兜底）
+            exe_urls = [p + asset_url for p in CDN_MIRROR_PREFIXES]
+            self.log_cb(f"[版本] GitHub API 获取最新版本成功 (version={version}, tag={tag})")
+            return {
+                'version': version,
+                'exe_urls': exe_urls,
+                'md5': None,  # API 不提供 md5，下载时跳过 MD5 校验
+                'release_note': data.get('body', '') or '',
+                'force_update': False,
+            }
+        except Exception as exc:
+            self.log_cb(f"[版本] GitHub API 获取失败: {exc}")
+            return None
+
     def _fetch_version_json(self):
         if not self.version_urls:
             return None
@@ -154,7 +214,12 @@ class AutoUpdater:
             try:
                 if url.startswith('http://') or url.startswith('https://'):
                     import requests
-                    r = requests.get(url, timeout=10)
+                    # CDN 防缓存：加 ?t=时间戳（raw 本身不缓存；ghproxy 镜像也不长缓存）
+                    if '?' in url:
+                        fetch_url = f"{url}&t={int(time.time())}"
+                    else:
+                        fetch_url = f"{url}?t={int(time.time())}"
+                    r = requests.get(fetch_url, timeout=10)
                     r.raise_for_status()
                     data = r.json()
                 else:
@@ -163,19 +228,26 @@ class AutoUpdater:
                     with open(url, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                 if isinstance(data, dict) and 'version' in data:
-                    self.log_cb(f"[版本] 从 {url} 获取版本信息成功")
+                    self.log_cb(f"[版本] 从 {url} 获取版本信息成功 (version={data.get('version')})")
                     return data
             except Exception as exc:
                 self.log_cb(f"[版本] {url} 获取失败: {exc}")
         return None
 
     def check_update(self):
-        data = self._fetch_version_json()
+        # 首选 GitHub API：无 CDN 缓存，始终返回真实最新版，
+        # 避免 jsDelivr/CDN 长缓存导致的"一版一版升"或检测错乱
+        data = self._fetch_latest_release_api()
+        if not data:
+            # 降级到 version.json 源（raw + ghproxy 镜像，已剔除 jsDelivr）
+            data = self._fetch_version_json()
         if not data:
             self.log_cb("[版本] 未配置更新源或获取失败，跳过")
             return None
         latest_ver = data.get('version', '0.0.0')
+        self.log_cb(f"[版本] 当前版本 v{self.current_version} | 最新版本 v{latest_ver}")
         if _parse_version(latest_ver) > _parse_version(self.current_version):
+            self.log_cb(f"[版本] 发现新版本 v{latest_ver}，准备更新")
             self._latest_info = data
             return data
         self.log_cb(f"[版本] 当前版本 v{self.current_version} 已是最新")
@@ -277,102 +349,63 @@ class AutoUpdater:
         if not new_exe_path or not os.path.exists(new_exe_path):
             return False
         if not getattr(sys, 'frozen', False):
-            # 源码模式：用脚本替换不现实，只在EXE模式可用
             self.log_cb("[更新] 源码模式跳过安装（仅EXE模式支持自动替换）")
             return False
 
-        old_exe = sys.executable
+        old_exe = os.path.abspath(sys.executable)
         old_dir = os.path.dirname(old_exe)
-        old_name = os.path.basename(old_exe)
         backup_exe = old_exe + ".bak"
+        parent_pid = os.getpid()
 
-        import tempfile, hashlib
+        # === 用当前 exe 自身作为 Worker 模式更新 ===
+        # 历史踩坑：
+        #   - .bat：中文路径在 GBK/UTF-8 codepage 间乱码 → 不替换/生成乱码文件
+        #   - PowerShell：5.1 对 PyInstaller frozen 父进程触发安全校验弹窗
+        #   - 外部 updater.exe：循环依赖（旧版本不含 updater.exe 无法更新到新版本）
+        # 结论：用自身 --update-worker 模式，任何版本都能自更新，无外部依赖。
+        # worker 模式入口在 main() 顶部，检测到 --update-worker=<jsonPath> 即
+        # 跳到 update_worker_main()，不加载任何 GUI/Tkinter。
+        import json, tempfile, hashlib
+
         tag = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
-        bat_path = os.path.join(tempfile.gettempdir(), f"update_{tag}.bat")
+        json_params_path = os.path.join(tempfile.gettempdir(), f"update_{tag}_params.json")
 
-        new_exe_in_bat = new_exe_path.replace('/', '\\')
-        old_exe_in_bat = old_exe.replace('/', '\\')
-        backup_in_bat = backup_exe.replace('/', '\\')
-        old_dir_in_bat = old_dir.replace('/', '\\')
+        params_json = json.dumps({
+            'parentPid': parent_pid,
+            'oldExe':  old_exe,
+            'newExe':  new_exe_path,
+            'bakExe':  backup_exe,
+            'workDir': old_dir,
+            'jsonPath': json_params_path,
+        }, ensure_ascii=False, indent=2)
 
-        # 构造批处理：等待退出 → 备份 → 覆盖 → 启动新EXE → 失败回滚 → 自删
-        bat_content = f'''@echo off
-chcp 65001 >nul
-set OLD_EXE="{old_exe_in_bat}"
-set NEW_EXE="{new_exe_in_bat}"
-set BAK_EXE="{backup_in_bat}"
-set WORK_DIR="{old_dir_in_bat}"
-set RESTART_CMD="{old_exe_in_bat}"
-
-:wait
-ping 127.0.0.1 -n 2 >nul
-REM 用 PID 数字匹配，避免中文进程名在 GBK 控制台乱码导致死循环
-tasklist /FI "PID eq {os.getpid()}" /NH 2>nul | findstr /B "{os.getpid()}" >nul
-if not errorlevel 1 goto wait
-
-REM 备份旧版本
-if exist %OLD_EXE% (
-  copy /Y %OLD_EXE% %BAK_EXE% >nul
-)
-
-REM 尝试覆盖（重试5次）
-set /a retry=0
-:copy_loop
-set /a retry+=1
-copy /Y %NEW_EXE% %OLD_EXE% >nul 2>&1
-if errorlevel 1 (
-  if %retry% lss 5 (
-    ping 127.0.0.1 -n 2 >nul
-    goto copy_loop
-  )
-  REM 覆盖失败，回滚
-  if exist %BAK_EXE% ( copy /Y %BAK_EXE% %OLD_EXE% >nul 2>&1 )
-  echo UPDATE_ROLLBACK
-  goto end
-)
-
-REM 覆盖成功，启动新程序
-start "" /D %WORK_DIR% %OLD_EXE%
-REM 删除临时文件
-del /F /Q %NEW_EXE% >nul 2>&1
-del /F /Q %BAK_EXE% >nul 2>&1
-
-:end
-REM 自删除
-del /F /Q "%~f0" >nul 2>&1
-'''
         try:
-            with open(bat_path, 'w', encoding='utf-8') as f:
-                f.write(bat_content)
-            self.log_cb(f"[更新] 生成更新脚本: {bat_path}")
+            with open(json_params_path, 'w', encoding='utf-8') as f:
+                f.write(params_json)
         except Exception as exc:
-            self.log_cb(f"[更新] 写入批处理失败: {exc}")
+            self.log_cb(f"[更新] 写入参数文件失败: {exc}")
             return False
 
-        # 启动批处理（独立进程，不阻塞，完全隐藏窗口）
-        # CREATE_NO_WINDOW (0x08000000) 必需，否则会弹黑窗
-        # DETACHED_PROCESS (0x00000008) 让子进程独立于父进程
+        # 启动 Worker（DETACHED，独立于父进程；os._exit 后 worker 继续运行）
         CREATE_NO_WINDOW = 0x08000000
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+        worker_arg = f'--update-worker={json_params_path}'
         try:
             subprocess.Popen(
-                ['cmd.exe', '/c', bat_path],
-                creationflags=CREATE_NO_WINDOW,
-                close_fds=True
+                [sys.executable, worker_arg],
+                cwd=old_dir,
+                creationflags=flags,
             )
+            self.log_cb(f"[更新] 启动更新 Worker (pid={parent_pid} -> worker)")
         except OSError as e:
-            self.log_cb(f'[!] 启动更新进程失败，尝试默认参数: {e}')
-            try:
-                subprocess.Popen(
-                    ['cmd.exe', '/c', bat_path],
-                    creationflags=CREATE_NO_WINDOW,
-                    close_fds=True
-                )
-            except OSError as e2:
-                self.log_cb(f'[!] 启动更新进程二次失败: {e2}')
-                return False
+            self.log_cb(f"[!] 启动更新 Worker 失败: {e}")
+            return False
 
+        self.log_cb(f"[更新] 日志将写入: %TEMP%\\update_last.log 和 {os.path.join(old_dir, 'update_last.log')}")
         self.log_cb("[更新] 正在重启应用完成更新...")
-        # 确保立即释放EXE句柄
         os._exit(0)
 
     def run_update_flow(self, force_dialog=False):
@@ -2064,6 +2097,187 @@ class DailyReportGUI:
         )
         updater.run_update_flow(force_dialog=force_dialog)
 
+def update_worker_main(json_path):
+    """
+    更新 Worker 模式：不加载 GUI，纯文件操作。
+    由 install_and_restart() 触发：主进程 os._exit 后，worker 副本负责
+    备份旧 exe → 覆盖新 exe → 启动新程序。
+
+    设计目的：
+    - 避免 PowerShell 5.1 的安全校验（Security validation failure:
+      parent process has different executable! / failed to obtain executable path...）
+    - 避免 cmd/.bat 的中文路径 GBK/UTF-8 乱码
+    - 100% 走 Python 文件 API（Copy-Item 级），中文路径零问题
+    """
+    import json, traceback, hashlib
+
+    # ===== 解析参数 =====
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            params = json.load(f)
+        parent_pid = int(params['parentPid'])
+        old_exe    = str(params['oldExe'])
+        new_exe    = str(params['newExe'])
+        bak_exe    = str(params['bakExe'])
+        work_dir   = str(params['workDir'])
+        cleanups   = [str(params['jsonPath'])]
+        if 'ps1Path' in params and params['ps1Path']: cleanups.append(str(params['ps1Path']))
+    except Exception as e:
+        # 尽量写日志（优先临时目录，避免 exe 目录无写权限）
+        try:
+            import tempfile as _tf
+            log = os.path.join(_tf.gettempdir(), 'update_last.log')
+            with open(log, 'a', encoding='utf-8') as f:
+                f.write(f"[{datetime.now():%H:%M:%S}] 参数解析失败: {e}\n")
+        except Exception:
+            pass
+        return 2
+
+    # 日志双写：优先临时目录（保证有写权限），同时尝试 exe 同目录（方便用户找）
+    import tempfile as _tf
+    _tmp_log = os.path.join(_tf.gettempdir(), 'update_last.log')
+    _exe_log = os.path.join(work_dir, 'update_last.log')
+    log_file = _tmp_log
+
+    def wlog(msg):
+        ts = datetime.now().strftime('%H:%M:%S')
+        # 双写：优先临时目录（一定有权限），同时尝试 exe 同目录（方便用户找）
+        for _p in (_tmp_log, _exe_log):
+            try:
+                with open(_p, 'a', encoding='utf-8') as f:
+                    f.write(f'[{ts}] {msg}\n')
+            except Exception:
+                pass
+
+    wlog("=" * 40)
+    wlog(f"开始更新 (pid={os.getpid()}) parentPid={parent_pid}")
+    wlog(f"oldExe={old_exe}")
+    wlog(f"newExe={new_exe}")
+    wlog(f"exe大小={os.path.getsize(new_exe)}" if os.path.exists(new_exe) else "新exe不存在！")
+
+    # ===== 检测父进程是否仍在（用 OpenProcess Win32，不触发任何安全校验） =====
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        SYNCHRONIZE = 0x00100000
+        def _is_alive(pid):
+            h = k32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, wintypes.DWORD(pid))
+            if not h:
+                return False
+            # WaitForSingleObject 0 毫秒：若已退出立刻返回 WAIT_OBJECT_0
+            WAIT_OBJECT_0 = 0
+            WAIT_TIMEOUT = 0x00000102
+            r = k32.WaitForSingleObject(h, 0)
+            k32.CloseHandle(h)
+            return r == WAIT_TIMEOUT
+    except Exception as e:
+        wlog(f"OpenProcess 不可用 ({e})，降级用 psutil/tasklist")
+        def _is_alive(pid):
+            # 兜底：tasklist /FO CSV 数字匹配
+            try:
+                import subprocess as _sp
+                out = _sp.check_output(
+                    ['tasklist', '/FI', f'PID eq {pid}', '/NH', '/FO', 'CSV'],
+                    stderr=_sp.DEVNULL
+                ).decode('gbk', errors='replace')
+                return f'"{pid}"' in out
+            except Exception:
+                return False
+
+    waited = 0
+    while waited < 10:
+        if not _is_alive(parent_pid):
+            wlog(f"父进程已退出 (等待 {waited}s)")
+            break
+        time.sleep(1)
+        waited += 1
+    if waited >= 10:
+        wlog(f"等待父进程超时 ({waited}s)，继续覆盖（有重试兜底）")
+    time.sleep(0.3)
+
+    # ===== 备份 =====
+    if os.path.exists(old_exe):
+        try:
+            import shutil as _su
+            _su.copy2(old_exe, bak_exe)
+            wlog(f"已备份 -> {os.path.basename(bak_exe)}")
+        except Exception as e:
+            wlog(f"备份失败: {e}")
+
+    # ===== 覆盖（重试 5 次，间隔 2s） =====
+    ok = False
+    last_err = None
+    import shutil as _su
+    for i in range(1, 6):
+        try:
+            _su.copy2(new_exe, old_exe)
+            # 验证 MD5 一致
+            def md5(p):
+                h = hashlib.md5()
+                with open(p, 'rb') as f:
+                    for c in iter(lambda: f.read(1024*1024), b''):
+                        h.update(c)
+                return h.hexdigest().lower()
+            if md5(old_exe) != md5(new_exe):
+                raise RuntimeError("覆盖后 MD5 不一致")
+            wlog(f"覆盖成功 ({i}/5)，MD5 校验通过")
+            ok = True
+            break
+        except Exception as e:
+            last_err = e
+            wlog(f"覆盖失败 {i}/5: {e}")
+            time.sleep(2)
+
+    if not ok:
+        wlog(f"覆盖失败，尝试回滚：{last_err}")
+        if os.path.exists(bak_exe):
+            try:
+                _su.copy2(bak_exe, old_exe)
+                wlog("回滚成功")
+            except Exception as e:
+                wlog(f"回滚失败: {e}")
+        # 回滚后依旧失败，留日志返回
+        return 1
+
+    # ===== 启动新程序 =====
+    started_ok = False
+    try:
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_NO_WINDOW = 0x08000000
+        flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        # 注意：不使用 close_fds=True 与 creationflags 同时传时在老 Python 有兼容
+        # 直接用 subprocess.Popen(executable, cwd=work_dir)，且不指定 stdio
+        import subprocess as _sp
+        _sp.Popen([old_exe], cwd=work_dir, creationflags=flags)
+        wlog("已启动新程序 (Popen+DETACHED)")
+        started_ok = True
+    except Exception as e:
+        wlog(f"Popen 启动失败: {e}")
+        try:
+            # 兜底：os.startfile
+            if hasattr(os, 'startfile'):
+                os.startfile(old_exe)
+                wlog("已启动新程序 (os.startfile 兜底)")
+                started_ok = True
+        except Exception as e2:
+            wlog(f"startfile 启动也失败: {e2}")
+
+    # ===== 清理临时文件 =====
+    for p in [new_exe, bak_exe] + cleanups:
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+                wlog(f"清理: {os.path.basename(p)}")
+        except Exception as e:
+            wlog(f"清理 {os.path.basename(p)} 失败: {e}")
+
+    wlog(f"更新完成，新程序启动状态: {'OK' if started_ok else '失败(请手动启动)'}")
+    return 0
+
+
 def gui_main():
     """GUI模式入口"""
     root = Tk()
@@ -2071,7 +2285,28 @@ def gui_main():
     root.mainloop()
 
 def main():
-    """主入口 - 默认启动GUI模式，-c参数启动命令行模式"""
+    """
+    主入口（按优先级判断模式）:
+      1) --update-worker=<jsonPath>   纯后台覆盖模式（优先级最高，绝不加载GUI）
+      2) -c / --cli                   命令行模式
+      3) 默认                          GUI 模式
+    """
+    for arg in sys.argv[1:]:
+        if arg.startswith('--update-worker='):
+            _path = arg.split('=', 1)[1].strip('"')
+            try:
+                _rc = update_worker_main(_path)
+            except Exception as _e:
+                try:
+                    import tempfile as _tf
+                    _log = os.path.join(_tf.gettempdir(), 'update_last.log')
+                    with open(_log, 'a', encoding='utf-8') as _f:
+                        import traceback as _tb
+                        _f.write(f"[{datetime.now():%H:%M:%S}] worker崩溃: {_e}\n{_tb.format_exc()}\n")
+                except Exception:
+                    pass
+                _rc = 99
+            sys.exit(_rc)
     if '-c' in sys.argv or '--cli' in sys.argv:
         cli_main()
     else:
