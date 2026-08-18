@@ -93,7 +93,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 & 自动更新 ================
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # 版本信息来源：按优先级依次尝试
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
@@ -721,6 +721,78 @@ def download_xdb():
     _set_progress(0, 0)
     return False
 
+def _get_requests_verify():
+    """返回 requests 可用的 verify 参数：frozen 模式下用 certifi 自带 CA，失败回退 False"""
+    try:
+        if getattr(sys, 'frozen', False):
+            try:
+                import certifi
+                ca_path = certifi.where()
+                if os.path.exists(ca_path):
+                    # 让 requests 使用 certifi 的 CA bundle（PyInstaller frozen 模式找不到系统证书）
+                    os.environ.setdefault('REQUESTS_CA_BUNDLE', ca_path)
+                    os.environ.setdefault('SSL_CERT_FILE', ca_path)
+                    return ca_path
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return True
+
+def download_xdb():
+    import requests
+    verify = _get_requests_verify()
+    for idx, url in enumerate(DOWNLOAD_SOURCES, 1):
+        try:
+            _log(f"[{idx}/{len(DOWNLOAD_SOURCES)}] 正在下载离线 IP 库: {url}")
+            # 第一次尝试使用 verify（正常CA验证）
+            try:
+                resp = requests.get(url, timeout=(30, 600), stream=True, verify=verify)
+                resp.raise_for_status()
+            except Exception as exc:
+                # 如果是 SSL 相关错误且 verify 不是 False，则降级 verify=False 重试
+                is_ssl_err = ('SSL' in str(type(exc).__name__) or 'SSL' in str(exc)
+                              or 'CERTIFICATE' in str(exc).upper()
+                              or isinstance(exc, requests.exceptions.SSLError))
+                if is_ssl_err and verify is not False:
+                    _log(f"  SSL验证失败，跳过证书验证重试...")
+                    resp = requests.get(url, timeout=(30, 600), stream=True, verify=False)
+                    resp.raise_for_status()
+                    # 首次 SSL 降级成功后，后续镜像也统一用 verify=False 提速
+                    verify = False
+                else:
+                    raise
+            total = int(resp.headers.get('content-length', 0))
+            if total > 0:
+                _set_progress(0, total)
+            downloaded = 0
+            # 确保目标目录存在（exe所在目录可能需要创建）
+            os.makedirs(os.path.dirname(os.path.abspath(XDB_FILE)), exist_ok=True)
+            with open(XDB_FILE, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            _set_progress(downloaded, total)
+            size_kb = os.path.getsize(XDB_FILE) // 1024
+            if size_kb < 9000:
+                _log(f"文件大小异常({size_kb}KB)，尝试下一个地址")
+                try:
+                    os.remove(XDB_FILE)
+                except OSError:
+                    pass
+                continue
+            _log(f"已保存: {XDB_FILE} ({size_kb} KB)")
+            _set_progress(0, 0)
+            return True
+        except Exception as exc:
+            _log(f"下载失败: {exc}")
+            _set_progress(0, 0)
+    _log("所有下载地址均失败，将使用在线 API 查询")
+    _set_progress(0, 0)
+    return False
+
 def get_offline_searcher():
     global XDB_FILE
     if XDB_FILE is None:
@@ -729,9 +801,11 @@ def get_offline_searcher():
             XDB_FILE = os.path.join(os.path.dirname(sys.executable), "ip2region_v4.xdb")
         else:
             XDB_FILE = os.path.join(script_dir, "ip2region_v4.xdb")
+    _log(f"[?] 检查本地IP库文件: {XDB_FILE}")
     # 检查文件是否存在及是否超过7天需要更新
     need_download = False
     if not os.path.exists(XDB_FILE):
+        _log("[!] 本地IP库不存在，开始下载...")
         need_download = True
     else:
         file_mtime = os.path.getmtime(XDB_FILE)
