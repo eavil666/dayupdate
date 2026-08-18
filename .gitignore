@@ -1,0 +1,51 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === 打包产物 ===
+build/
+dist/
+*.spec
+_runtime_hook.py
+build_exe.spec
+
+# === IDE / 编辑器 ===
+.vscode/
+.idea/
+*.swp
+*~
+
+# === 运行时输出 ===
+output/
+*.log
+
+# === 备份文件 ===
+*.bak
+*.bak_*
+main.py.bak_*
+
+# === 业务数据（敏感，不提交）===
+*.xlsx
+*.csv
+!config.ini.example
+
+# === 大数据库文件（运行时下载）===
+*.xdb
+ip2region_v4.xdb
+
+# === 二进制工具 ===
+upx.exe
+
+# === 配置文件（含路径/凭据，按需取消注释）===
+# config.ini
