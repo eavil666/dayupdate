@@ -233,7 +233,7 @@ exe = EXE(
     exe_path = os.path.join(dist_dir, '网络安全值守日报.exe')
     if os.path.exists(exe_path):
         exe_size = os.path.getsize(exe_path) / (1024 * 1024)
-        print('[✓] 打包完成！')
+        print('[OK] 打包完成！')
         print(f'    文件: {exe_path}')
         print(f'    大小: {exe_size:.2f} MB')
     else:

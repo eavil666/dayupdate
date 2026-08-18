@@ -100,9 +100,9 @@ APP_VERSION = "1.1.1"
 # {
 #   "version": "1.1.0",
 #   "exe_urls": [
-#     "https://github.com/eavil666/dayupdate/releases/download/v1.1.0/网络安全值守日报.exe",
-#     "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.1.0/网络安全值守日报.exe",
-#     "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.1.0/网络安全值守日报.exe"
+#     "https://github.com/eavil666/dayupdate/releases/download/v1.1.0/daily-report.exe",
+#     "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.1.0/daily-report.exe",
+#     "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.1.0/daily-report.exe"
 #   ],
 #   "md5": "abc123...",
 #   "release_note": "修复IP归属显示问题",
@@ -118,10 +118,10 @@ UPDATE_VERSION_URLS = [
 
 # 备选EXE下载源（如果version.json内未提供exe_urls/exe_url）
 UPDATE_EXE_URLS = [
-    "https://github.com/eavil666/dayupdate/releases/download/v{version}/网络安全值守日报.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v{version}/网络安全值守日报.exe",
-    # "http://intranet-server/apps/report/网络安全值守日报-{version}.exe",
-    # r"\\file-server\share\report\网络安全值守日报-{version}.exe",
+    "https://github.com/eavil666/dayupdate/releases/download/v{version}/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v{version}/daily-report.exe",
+    # "http://intranet-server/apps/report/daily-report-{version}.exe",
+    # r"\\file-server\share\report\daily-report-{version}.exe",
 ]
 
 

@@ -38,7 +38,8 @@ import shutil
 script_dir = os.path.dirname(os.path.abspath(__file__))
 REPO_OWNER = 'eavil666'
 REPO_NAME = 'dayupdate'
-EXE_NAME = '网络安全值守日报.exe'
+EXE_NAME = '网络安全值守日报.exe'              # 本地打包生成的 exe 名（中文，用户体验）
+EXE_NAME_GH = 'daily-report.exe'              # GitHub Release asset 名（英文，GitHub 不支持中文名）
 VERSION_JSON = 'version.json'
 MAIN_PY = 'main.py'
 EXE_PATH = os.path.join(script_dir, 'dist', EXE_NAME)
@@ -161,7 +162,7 @@ def update_version_json(version, md5):
 
     data['version'] = version
     data['md5'] = md5
-    # 更新 exe_urls 中的版本号
+    # 更新 exe_urls 中的版本号（GitHub asset 用英文名 daily-report.exe）
     old_version_pattern = re.compile(r'/releases/download/v[^/]+/')
     new_segment = f'/releases/download/v{version}/'
     if 'exe_urls' in data:
@@ -260,18 +261,16 @@ def create_release(token, version):
 
 
 def upload_asset(token, release, exe_path):
-    """上传 exe 到 Release"""
+    """上传 exe 到 Release（GitHub asset 名用英文，不支持中文）"""
     upload_url = release['upload_url'].split('{')[0]  # 去掉 {?name,label}
-    # URL 编码中文文件名
-    from urllib.parse import quote
-    asset_url = f'{upload_url}?name={quote(EXE_NAME)}'
+    asset_url = f'{upload_url}?name={EXE_NAME_GH}'
 
     size = os.path.getsize(exe_path)
-    log(f'上传 exe ({size / 1024 / 1024:.2f} MB)...')
+    log(f'上传 exe ({size / 1024 / 1024:.2f} MB), asset 名: {EXE_NAME_GH}')
 
     # 删除已存在的同名 asset
     for asset in release.get('assets', []):
-        if asset['name'] == EXE_NAME:
+        if asset['name'] == EXE_NAME_GH:
             log_warn(f'删除旧 asset: {asset["id"]}')
             github_api('DELETE', f'/repos/{REPO_OWNER}/{REPO_NAME}/releases/assets/{asset["id"]}', token)
 
@@ -364,7 +363,7 @@ def main():
         sys.exit(1)
 
     print('=' * 60)
-    log(f'发布完成! v{version}')
+    print('[OK] 发布完成! v{}'.format(version))
     print(f'    Release: https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{version}')
     print(f'    version.json: https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/version.json')
     print('=' * 60)
