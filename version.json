@@ -1,13 +1,13 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.1",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.0.0/网络安全值守日报.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.0.0/网络安全值守日报.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.0.0/网络安全值守日报.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.0.0/网络安全值守日报.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.0.0/网络安全值守日报.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.1.1/网络安全值守日报.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/网络安全值守日报.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/网络安全值守日报.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/网络安全值守日报.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/网络安全值守日报.exe"
   ],
-  "md5": "126DC9A6C6FAEA4007B8CFFE06D11729",
+  "md5": "B4B981FE5C38521BC23EA00FC9845F93",
   "release_note": "首次发布版本\n- 网络安全值守日报自动生成\n- IP归属分析（ip2region + 在线查询）\n- Tkinter GUI + 自动更新",
   "force_update": false
 }

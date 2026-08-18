@@ -93,7 +93,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 & 自动更新 ================
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.1"
 
 # 版本信息来源：按优先级依次尝试
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
