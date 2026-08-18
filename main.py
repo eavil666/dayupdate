@@ -93,7 +93,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 & 自动更新 ================
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 
 # 版本信息来源：按优先级依次尝试
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
@@ -306,7 +306,8 @@ set RESTART_CMD="{old_exe_in_bat}"
 
 :wait
 ping 127.0.0.1 -n 2 >nul
-tasklist /FI "PID eq {os.getpid()}" 2>nul | find /I "{old_name}" >nul
+REM 用 PID 数字匹配，避免中文进程名在 GBK 控制台乱码导致死循环
+tasklist /FI "PID eq {os.getpid()}" /NH 2>nul | findstr /B "{os.getpid()}" >nul
 if not errorlevel 1 goto wait
 
 REM 备份旧版本
@@ -348,16 +349,27 @@ del /F /Q "%~f0" >nul 2>&1
             self.log_cb(f"[更新] 写入批处理失败: {exc}")
             return False
 
-        # 启动批处理（独立进程，不阻塞）
+        # 启动批处理（独立进程，不阻塞，完全隐藏窗口）
+        # CREATE_NO_WINDOW (0x08000000) 必需，否则会弹黑窗
+        # DETACHED_PROCESS (0x00000008) 让子进程独立于父进程
+        CREATE_NO_WINDOW = 0x08000000
         try:
             subprocess.Popen(
                 ['cmd.exe', '/c', bat_path],
-                creationflags=0x00000008,  # DETACHED_PROCESS
+                creationflags=CREATE_NO_WINDOW,
                 close_fds=True
             )
         except OSError as e:
             self.log_cb(f'[!] 启动更新进程失败，尝试默认参数: {e}')
-            subprocess.Popen(['cmd.exe', '/c', bat_path], close_fds=True)
+            try:
+                subprocess.Popen(
+                    ['cmd.exe', '/c', bat_path],
+                    creationflags=CREATE_NO_WINDOW,
+                    close_fds=True
+                )
+            except OSError as e2:
+                self.log_cb(f'[!] 启动更新进程二次失败: {e2}')
+                return False
 
         self.log_cb("[更新] 正在重启应用完成更新...")
         # 确保立即释放EXE句柄
