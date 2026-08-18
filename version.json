@@ -1,13 +1,13 @@
 {
-  "version": "1.1.1",
+  "version": "1.2.0",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.1.1/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.1.1/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.2.0/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.2.0/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.2.0/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.2.0/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.2.0/daily-report.exe"
   ],
-  "md5": "B4B981FE5C38521BC23EA00FC9845F93",
+  "md5": "8A6AE65CA35FC8F40FE925E1583D1C20",
   "release_note": "v1.1.1 版本\n- 网络安全值守日报自动生成\n- IP归属分析（ip2region + 在线查询）\n- Tkinter GUI + 自动更新\n- CDN 多镜像源回退下载",
   "force_update": false
 }
