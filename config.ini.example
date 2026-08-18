@@ -1,0 +1,31 @@
+[base]
+report_title = 网络安全值守保障日报
+input_pattern = *.xlsx
+output_dir = output
+intel_file = intel.csv
+
+[network]
+# 内网网段（CIDR），按实际填写
+ranges =
+    10.0.0.0/8
+    172.16.0.0/12
+    192.168.0.0/16
+    127.0.0.0/8
+
+# 内网区域关键词（逗号分隔）
+internal_zones = 票务清分区域,控制中心区域,车站业务区域
+# 本地归属地关键词（逗号分隔）
+local_geos = 长春,本地
+
+# 本地公网IP（需排除的业务IP，逗号分隔，支持范围简写如 1.2.3.4-10）
+excluded_ips =
+
+[health]
+# 探针配置（每行一个，格式：名称|IP）
+probes =
+log_retention_days = 180
+
+[report]
+top_events = 5
+critical_levels = 严重,高危
+ban_levels = 高危,严重
