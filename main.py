@@ -99,20 +99,27 @@ APP_VERSION = "1.0.0"
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
 # {
 #   "version": "1.1.0",
-#   "exe_url": "https://xxx/releases/download/v1.1.0/网络安全值守日报.exe",
+#   "exe_urls": [
+#     "https://github.com/eavil666/dayupdate/releases/download/v1.1.0/网络安全值守日报.exe",
+#     "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.1.0/网络安全值守日报.exe",
+#     "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.1.0/网络安全值守日报.exe"
+#   ],
 #   "md5": "abc123...",
 #   "release_note": "修复IP归属显示问题",
 #   "force_update": false
 # }
+# exe_urls 为数组时按顺序回退；也兼容 exe_url 单字符串格式
 UPDATE_VERSION_URLS = [
     "https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
+    "https://cdn.jsdelivr.net/gh/eavil666/dayupdate@main/version.json",
     # "http://intranet-server/apps/report/version.json",
     # r"\\file-server\share\report\version.json",
 ]
 
-# 备选EXE下载源（如果version.json内未提供）
+# 备选EXE下载源（如果version.json内未提供exe_urls/exe_url）
 UPDATE_EXE_URLS = [
     "https://github.com/eavil666/dayupdate/releases/download/v{version}/网络安全值守日报.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v{version}/网络安全值守日报.exe",
     # "http://intranet-server/apps/report/网络安全值守日报-{version}.exe",
     # r"\\file-server\share\report\网络安全值守日报-{version}.exe",
 ]
@@ -216,16 +223,21 @@ class AutoUpdater:
         self.progress_cb(0, 0)
         return file_size
 
-    def _resolve_exe_url(self, info):
-        if info and info.get('exe_url'):
-            return info['exe_url']
+    def _resolve_exe_urls(self, info):
+        """解析 EXE 下载地址列表，支持 exe_urls(数组/CDN回退) 和 exe_url(单字符串/兼容)"""
+        if info:
+            if info.get('exe_urls'):
+                return info['exe_urls']
+            if info.get('exe_url'):
+                return [info['exe_url']]
         version = info.get('version', '') if info else ''
+        urls = []
         for url in self.exe_urls:
             try:
-                return url.format(version=version)
+                urls.append(url.format(version=version))
             except (KeyError, IndexError):
                 continue
-        return None
+        return urls
 
     def download_update(self, info=None):
         if info is None:
@@ -233,8 +245,8 @@ class AutoUpdater:
         if not info:
             return None
 
-        exe_url = self._resolve_exe_url(info)
-        if not exe_url:
+        exe_urls = self._resolve_exe_urls(info)
+        if not exe_urls:
             self.log_cb("[更新] 未配置EXE下载地址")
             return None
 
@@ -242,19 +254,24 @@ class AutoUpdater:
         tmp_dir = tempfile.gettempdir()
         tmp_exe = os.path.join(tmp_dir, f"report_update_{int(time.time())}.exe")
 
-        self.log_cb(f"[更新] 下载新版本 v{info.get('version')}: {exe_url}")
-        try:
-            size = self._download(exe_url, tmp_exe, info.get('md5'))
-            self.log_cb(f"[更新] 下载完成: {size // 1024 // 1024} MB")
-            return tmp_exe
-        except Exception as exc:
-            self.log_cb(f"[更新] 下载失败: {exc}")
+        for idx, exe_url in enumerate(exe_urls):
             try:
-                if os.path.exists(tmp_exe):
-                    os.remove(tmp_exe)
-            except OSError as e:
-                self.log_cb(f'[!] 清理临时文件失败: {e}')
-            return None
+                self.log_cb(f"[更新] 下载新版本 v{info.get('version')}: {exe_url}")
+                size = self._download(exe_url, tmp_exe, info.get('md5'))
+                self.log_cb(f"[更新] 下载完成: {size // 1024 // 1024} MB")
+                return tmp_exe
+            except Exception as exc:
+                self.log_cb(f"[更新] 下载失败: {exc}")
+                try:
+                    if os.path.exists(tmp_exe):
+                        os.remove(tmp_exe)
+                except OSError as e:
+                    self.log_cb(f'[!] 清理临时文件失败: {e}')
+                if idx < len(exe_urls) - 1:
+                    self.log_cb("[更新] 尝试下一个镜像源...")
+                else:
+                    self.log_cb("[!] 所有镜像源均下载失败")
+                    return None
 
     def install_and_restart(self, new_exe_path):
         if not new_exe_path or not os.path.exists(new_exe_path):
