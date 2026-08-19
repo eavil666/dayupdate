@@ -35,6 +35,21 @@ import urllib.request
 import urllib.error
 import shutil
 
+# === Windows 控制台 UTF-8（避免中文乱码/UnicodeEncodeError）===
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:
+        pass
+# 强制标准流使用 UTF-8，避免 print 中文（如 exe 名）时崩溃/卡住
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 REPO_OWNER = 'eavil666'
 REPO_NAME = 'dayupdate'
@@ -126,13 +141,27 @@ def set_app_version(version):
     return True
 
 
-def run_build():
-    """运行 build_exe.py 打包"""
+def run_build(version=None):
+    """运行 build_exe.py 打包。
+
+    必须传入 version（--version），否则 build_exe.py 会用 `git describe --tags`
+    推导版本号；当本地缺少最新 tag 时会取到旧 tag（如 v1.2.1），把 APP_VERSION
+    覆写成旧版本，导致打出的 exe 实际版本 < version.json 声明版本，
+    升级后程序仍认为自己是旧版 → 重复升级（"一版一版升"）。
+    """
     log('开始打包...')
+    # 强制子进程（build_exe.py -> PyInstaller）使用 UTF-8，避免中文输出乱码
+    env = os.environ.copy()
+    env['PYTHONUTF8'] = '1'
+    env['PYTHONIOENCODING'] = 'utf-8'
+    cmd = [sys.executable, 'build_exe.py']
+    if version:
+        cmd += ['--version', version]
     result = subprocess.run(
-        [sys.executable, 'build_exe.py'],
+        cmd,
         cwd=script_dir,
-        capture_output=False
+        capture_output=False,
+        env=env,
     )
     if result.returncode != 0:
         log_err('打包失败')
@@ -177,8 +206,15 @@ def update_version_json(version, md5):
 
 def git_commit_tag_push(version):
     """git add/commit/tag/push"""
+    # 注入 git 提交身份（避免 "Author identity unknown" 导致 commit 失败）；
+    # 用 setdefault：若用户已自行配置则尊重已有配置
+    os.environ.setdefault('GIT_AUTHOR_NAME', 'eavil666')
+    os.environ.setdefault('GIT_AUTHOR_EMAIL', 'eavil666@users.noreply.github.com')
+    os.environ.setdefault('GIT_COMMITTER_NAME', 'eavil666')
+    os.environ.setdefault('GIT_COMMITTER_EMAIL', 'eavil666@users.noreply.github.com')
     log('提交代码到 git...')
-    subprocess.run(['git', 'add', MAIN_PY, VERSION_JSON, 'config.ini.example'],
+    subprocess.run(['git', 'add', MAIN_PY, VERSION_JSON, 'config.ini.example',
+                    'release.py', 'build_exe.py'],
                    cwd=script_dir, check=True)
     # 检查是否有改动
     result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=script_dir)
@@ -331,9 +367,9 @@ def main():
             sys.exit(1)
         log(f'当前版本: v{version}')
 
-    # 3. 打包
+    # 3. 打包（传入版本号，防止 build_exe.py 从 git 标签覆写成旧版本）
     if not args.skip_build:
-        if not run_build():
+        if not run_build(version):
             sys.exit(1)
     else:
         log_warn('跳过打包步骤')

@@ -194,7 +194,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX=False：避免压缩后的 exe 被覆盖/重启时被杀软（Defender/火绒/360）误报为可疑
+    # 体积会增大，但自动更新更稳定
+    upx=False,
     upx_dir=r'{upx_d}',
     upx_exclude=[],
     runtime_tmpdir=None,
@@ -240,10 +242,126 @@ exe = EXE(
         print('[-] 打包失败，exe文件未生成')
 
 
+def build_updater():
+    """打包微型 updater.exe（仅 stdlib，约 5MB）"""
+    dist_dir = os.path.join(script_dir, 'dist')
+    build_dir = os.path.join(script_dir, 'build_updater')
+
+    # 清理旧产物
+    for d in (dist_dir, build_dir):
+        if os.path.exists(d):
+            for f in os.listdir(d):
+                fp = os.path.join(d, f)
+                if f == 'updater.exe':
+                    try:
+                        os.remove(fp)
+                    except PermissionError:
+                        pass
+            if d == build_dir:
+                try:
+                    shutil.rmtree(d)
+                except PermissionError:
+                    pass
+
+    upx_path = 'upx'
+    for path in [
+        os.path.join(script_dir, 'upx.exe'),
+        os.path.join(os.path.dirname(sys.executable), 'upx.exe'),
+    ]:
+        if os.path.exists(path):
+            upx_path = path
+            break
+    upx_dir = os.path.dirname(upx_path) if upx_path != 'upx' else ''
+    upx_d = upx_dir.replace('\\', '/') if upx_dir else ''
+
+    sd = script_dir.replace('\\', '/')
+
+    spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
+block_cipher = None
+
+a = Analysis(
+    ['updater.py'],
+    pathex=[r'{sd}'],
+    binaries=[],
+    datas=[],
+    hiddenimports=['ctypes', 'json', 'shutil', 'hashlib', 'tempfile'],
+    hookspath=[],
+    hooksconfig={{}},
+    runtime_hooks=[],
+    excludes=[
+        'pandas', 'numpy', 'openpyxl', 'docx', 'requests',
+        'ip2region', 'tkinter', 'matplotlib', 'scipy', 'PIL',
+        'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+        'IPython', 'jupyter', 'notebook', 'pytest',
+        'flask', 'django', 'fastapi',
+        'cv2', 'pywin32', 'win32com',
+        'unittest', 'doctest', 'pydoc',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='updater',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    upx_dir=r'{upx_d}',
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+'''
+
+    spec_file = os.path.join(script_dir, 'build_updater.spec')
+    with open(spec_file, 'w', encoding='utf-8') as f:
+        f.write(spec_content)
+
+    env = os.environ.copy()
+    env['PYINSTALLER_CONFIG_DIR'] = os.path.join(script_dir, 'build_updater', 'pyinstaller_cache')
+
+    cmd = [
+        sys.executable, '-m', 'PyInstaller',
+        spec_file,
+        '--distpath=dist',
+        '--workpath=build_updater',
+    ]
+    print(f'[+] 打包 updater.exe...')
+    subprocess.check_call(cmd, env=env)
+
+    if os.path.exists(spec_file):
+        os.remove(spec_file)
+
+    exe_path = os.path.join(dist_dir, 'updater.exe')
+    if os.path.exists(exe_path):
+        exe_size = os.path.getsize(exe_path) / (1024 * 1024)
+        print(f'[OK] updater.exe 打包完成 ({exe_size:.2f} MB)')
+    else:
+        print('[-] updater.exe 打包失败')
+
+
 def main():
     parser = argparse.ArgumentParser(description='网络安全值守日报 - 打包工具')
     parser.add_argument('--version', '-V', type=str, default=None,
                         help='手动指定版本号（如 1.1.0），优先于 Git 标签')
+    parser.add_argument('--skip-updater', action='store_true',
+                        help='跳过 updater.exe 打包')
     args = parser.parse_args()
 
     print('=' * 60)
@@ -269,6 +387,10 @@ def main():
     print('=' * 60)
 
     install_pyinstaller()
+    # updater.exe 方案已废弃（循环依赖问题），改用 --update-worker 模式
+    # 如需打包 updater.exe，手动调用 build_updater()
+    # if not args.skip_updater:
+    #     build_updater()
     build_exe()
 
 

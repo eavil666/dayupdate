@@ -7,7 +7,7 @@
     "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe",
     "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe"
   ],
-  "md5": "027EDBAF3A414B51152C4081D9B4BCB1",
+  "md5": "94BB05C892389F000FA1910C8C75B57A",
   "release_note": "v1.1.1 版本\n- 网络安全值守日报自动生成\n- IP归属分析（ip2region + 在线查询）\n- Tkinter GUI + 自动更新\n- CDN 多镜像源回退下载",
   "force_update": false
 }
