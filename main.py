@@ -93,7 +93,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 & 自动更新 ================
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 # 版本信息来源：按优先级依次尝试
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
@@ -468,10 +468,19 @@ class AutoUpdater:
 
         worker_arg = f'--update-worker={json_params_path}'
         try:
+            # 用 STARTUPINFO + stdio 重定向确保更新 Worker 完全不弹控制台窗口，
+            # 避免中文标题/路径在错误代码页下出现乱码（旧版 find /I 命令的坑）。
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
             subprocess.Popen(
                 [worker_exe, worker_arg],
                 cwd=old_dir,
                 creationflags=flags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                startupinfo=startupinfo,
             )
             self.log_cb(f"[更新] 启动更新 Worker (pid={parent_pid} -> worker={os.path.basename(worker_exe)})")
         except OSError as e:
@@ -2347,12 +2356,16 @@ def update_worker_main(json_path):
     except Exception as e:
         wlog(f"OpenProcess 不可用 ({e})，降级用 psutil/tasklist")
         def _is_alive(pid):
-            # 兜底：tasklist /FO CSV 数字匹配
+            # 兜底：tasklist /FO CSV 数字匹配（隐藏窗口，防止闪现乱码）
             try:
                 import subprocess as _sp
+                startupinfo = _sp.STARTUPINFO()
+                startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = _sp.SW_HIDE
                 out = _sp.check_output(
                     ['tasklist', '/FI', f'PID eq {pid}', '/NH', '/FO', 'CSV'],
-                    stderr=_sp.DEVNULL
+                    stderr=_sp.DEVNULL,
+                    startupinfo=startupinfo,
                 ).decode('gbk', errors='replace')
                 return f'"{pid}"' in out
             except Exception:
@@ -2423,7 +2436,14 @@ def update_worker_main(json_path):
         # 注意：不使用 close_fds=True 与 creationflags 同时传时在老 Python 有兼容
         # 直接用 subprocess.Popen(executable, cwd=work_dir)，且不指定 stdio
         import subprocess as _sp
-        _sp.Popen([old_exe], cwd=work_dir, creationflags=flags)
+        startupinfo = _sp.STARTUPINFO()
+        startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = _sp.SW_HIDE
+        _sp.Popen(
+            [old_exe], cwd=work_dir, creationflags=flags,
+            stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            startupinfo=startupinfo,
+        )
         wlog("已启动新程序 (Popen+DETACHED)")
         started_ok = True
     except Exception as e:
