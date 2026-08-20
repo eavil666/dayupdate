@@ -1,13 +1,13 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.3.0/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.4.0/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.4.0/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.4.0/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.4.0/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.4.0/daily-report.exe"
   ],
-  "md5": "94BB05C892389F000FA1910C8C75B57A",
-  "release_note": "v1.1.1 版本\n- 网络安全值守日报自动生成\n- IP归属分析（ip2region + 在线查询）\n- Tkinter GUI + 自动更新\n- CDN 多镜像源回退下载",
+  "md5": "C7C88E84E5BA8F26726F74EB9F10466E",
+  "release_note": "v1.4.0\n- 自动更新模块重构：更新源改为 config.ini 可配置（[update] 段），支持内网 HTTP / 共享目录兜底，不再强依赖 GitHub\n- 更新检查失败显式弹窗提示（区分「网络不可达」与「已是最新」），不再静默吞错\n- 修复 requests 缺失时更新检查崩溃的健壮性问题\n- 构建时内置 certifi CA 证书，修复冻结模式 ssl 校验路径问题\n- 基于 Python 3.14 重新打包",
   "force_update": false
 }

@@ -93,7 +93,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 & 自动更新 ================
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 # 版本信息来源：按优先级依次尝试
 # 在 GitHub / 内网HTTP / 共享目录 放置 version.json，例如：
@@ -165,6 +165,9 @@ class AutoUpdater:
         self.log_cb = log_cb or (lambda m: print(m))
         self.ask_confirm_cb = ask_confirm_cb or (lambda msg: True)
         self._latest_info = None
+        self.custom_source = bool(version_urls)  # 是否使用了 config 自定义源（通常是内网）
+        self.last_check_error = None   # 版本信息获取失败原因（用于区分"已是最新"）
+        self.last_status = None        # 更新流程终态：发现新版本/已是最新/检查失败/下载失败/安装失败/用户取消
 
     def _fetch_latest_release_api(self):
         """通过 GitHub API 获取最新 release（无 CDN 缓存，始终返回真实最新版）。
@@ -177,11 +180,28 @@ class AutoUpdater:
         返回与 version.json 同结构的 dict；API 不提供 md5，下载时不做 MD5 校验
         （requests 流式下载 + raise_for_status 已能捕获传输错误，足够可靠）。
         """
-        import requests
         try:
-            r = requests.get(GITHUB_API_LATEST, timeout=10,
-                             headers={'User-Agent': 'daily-report-updater'})
-            r.raise_for_status()
+            import requests
+        except ImportError:
+            self.log_cb("[版本] 缺少 requests 库，跳过 GitHub API 检查")
+            return None
+        verify = _get_requests_verify()
+        try:
+            try:
+                r = requests.get(GITHUB_API_LATEST, timeout=10,
+                                 headers={'User-Agent': 'daily-report-updater'},
+                                 verify=verify)
+                r.raise_for_status()
+            except Exception as exc:
+                is_ssl_err = _is_ssl_or_ca_error(exc)
+                if is_ssl_err and verify is not False:
+                    self.log_cb('[版本] GitHub API SSL验证失败，跳过证书验证重试')
+                    r = requests.get(GITHUB_API_LATEST, timeout=10,
+                                     headers={'User-Agent': 'daily-report-updater'},
+                                     verify=False)
+                    r.raise_for_status()
+                else:
+                    raise
             data = r.json()
             tag = data.get('tag_name', '') or ''
             version = tag.lstrip('vV').strip()
@@ -219,8 +239,17 @@ class AutoUpdater:
                         fetch_url = f"{url}&t={int(time.time())}"
                     else:
                         fetch_url = f"{url}?t={int(time.time())}"
-                    r = requests.get(fetch_url, timeout=10)
-                    r.raise_for_status()
+                    vf = _get_requests_verify()
+                    try:
+                        r = requests.get(fetch_url, timeout=10, verify=vf)
+                        r.raise_for_status()
+                    except Exception as exc:
+                        is_ssl_err = _is_ssl_or_ca_error(exc)
+                        if is_ssl_err and vf is not False:
+                            r = requests.get(fetch_url, timeout=10, verify=False)
+                            r.raise_for_status()
+                        else:
+                            raise
                     data = r.json()
                 else:
                     # 共享目录 / 本地文件
@@ -234,31 +263,58 @@ class AutoUpdater:
                 self.log_cb(f"[版本] {url} 获取失败: {exc}")
         return None
 
-    def check_update(self):
-        # 首选 GitHub API：无 CDN 缓存，始终返回真实最新版，
-        # 避免 jsDelivr/CDN 长缓存导致的"一版一版升"或检测错乱
-        data = self._fetch_latest_release_api()
-        if not data:
-            # 降级到 version.json 源（raw + ghproxy 镜像，已剔除 jsDelivr）
-            data = self._fetch_version_json()
-        if not data:
-            self.log_cb("[版本] 未配置更新源或获取失败，跳过")
-            return None
+    def _eval_and_return(self, data):
+        """根据版本号判断是否有新版本，并记录状态后返回 info 或 None。"""
         latest_ver = data.get('version', '0.0.0')
         self.log_cb(f"[版本] 当前版本 v{self.current_version} | 最新版本 v{latest_ver}")
         if _parse_version(latest_ver) > _parse_version(self.current_version):
             self.log_cb(f"[版本] 发现新版本 v{latest_ver}，准备更新")
+            self.last_check_error = None
+            self.last_status = "发现新版本"
             self._latest_info = data
             return data
         self.log_cb(f"[版本] 当前版本 v{self.current_version} 已是最新")
+        self.last_check_error = None
+        self.last_status = "已是最新"
         return None
+
+    def check_update(self):
+        # 配置了自定义（通常是内网）更新源时，跳过 GitHub API 探测，直接走自定义源
+        if self.custom_source:
+            data = self._fetch_version_json()
+            if data:
+                return self._eval_and_return(data)
+            self.last_check_error = "配置的更新源均获取失败（网络不可达或源无响应）"
+            self.last_status = "检查失败"
+            self.log_cb("[版本] 自定义更新源获取失败，跳过")
+            return None
+        # 默认链路：GitHub API 首选（无 CDN 缓存），失败降级 version.json 镜像源
+        data = self._fetch_latest_release_api()
+        if not data:
+            data = self._fetch_version_json()
+        if not data:
+            self.last_check_error = "所有更新源（GitHub API / 镜像）均获取失败，可能为网络不可达"
+            self.last_status = "检查失败"
+            self.log_cb("[版本] 未配置更新源或获取失败，跳过")
+            return None
+        return self._eval_and_return(data)
 
     def _download(self, url, dest_path, expected_md5=None):
         file_size = 0
         if url.startswith('http://') or url.startswith('https://'):
             import requests
-            resp = requests.get(url, timeout=(30, 600), stream=True)
-            resp.raise_for_status()
+            vf = _get_requests_verify()
+            try:
+                resp = requests.get(url, timeout=(30, 600), stream=True, verify=vf)
+                resp.raise_for_status()
+            except Exception as exc:
+                is_ssl_err = _is_ssl_or_ca_error(exc)
+                if is_ssl_err and vf is not False:
+                    self.log_cb('[更新] 下载SSL验证失败，跳过证书验证重试')
+                    resp = requests.get(url, timeout=(30, 600), stream=True, verify=False)
+                    resp.raise_for_status()
+                else:
+                    raise
             total = int(resp.headers.get('content-length', 0))
             if total > 0:
                 self.progress_cb(0, total)
@@ -365,10 +421,27 @@ class AutoUpdater:
         # 结论：用自身 --update-worker 模式，任何版本都能自更新，无外部依赖。
         # worker 模式入口在 main() 顶部，检测到 --update-worker=<jsonPath> 即
         # 跳到 update_worker_main()，不加载任何 GUI/Tkinter。
-        import json, tempfile, hashlib
+        import json, tempfile, hashlib, shutil as _shu
 
         tag = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
         json_params_path = os.path.join(tempfile.gettempdir(), f"update_{tag}_params.json")
+
+        # === 先准备 Worker 副本 ===
+        # 关键：不能直接用 sys.executable 启动 Worker！
+        #   - PyInstaller frozen exe 运行时会锁住自身文件，
+        #     Worker = 原 exe 副本 -> 自己锁住了要覆盖的目标文件 -> [WinError 32]
+        #   - 也不能用 new_exe_path：若新 exe 不含 --update-worker（如 v1.2.1），
+        #     Worker 会直接进入 GUI 模式
+        # 方案：复制原 exe 到 %TEMP%，用副本启动 Worker。
+        #   - Worker 的 sys.executable = 临时副本，不锁住原 exe
+        #   - Worker 代码来自原 exe，一定包含 --update-worker 支持
+        worker_exe = os.path.join(tempfile.gettempdir(), f"update_worker_{tag}.exe")
+        try:
+            _shu.copy2(sys.executable, worker_exe)
+            self.log_cb(f"[更新] 已复制 Worker 副本: {os.path.basename(worker_exe)}")
+        except Exception as exc:
+            self.log_cb(f"[更新] 复制 Worker 副本失败: {exc}")
+            return False
 
         params_json = json.dumps({
             'parentPid': parent_pid,
@@ -377,6 +450,7 @@ class AutoUpdater:
             'bakExe':  backup_exe,
             'workDir': old_dir,
             'jsonPath': json_params_path,
+            'workerExe': worker_exe,
         }, ensure_ascii=False, indent=2)
 
         try:
@@ -395,11 +469,11 @@ class AutoUpdater:
         worker_arg = f'--update-worker={json_params_path}'
         try:
             subprocess.Popen(
-                [sys.executable, worker_arg],
+                [worker_exe, worker_arg],
                 cwd=old_dir,
                 creationflags=flags,
             )
-            self.log_cb(f"[更新] 启动更新 Worker (pid={parent_pid} -> worker)")
+            self.log_cb(f"[更新] 启动更新 Worker (pid={parent_pid} -> worker={os.path.basename(worker_exe)})")
         except OSError as e:
             self.log_cb(f"[!] 启动更新 Worker 失败: {e}")
             return False
@@ -412,7 +486,8 @@ class AutoUpdater:
         info = self.check_update()
         if not info:
             if force_dialog:
-                self.log_cb("[更新] 当前已是最新版本")
+                self.log_cb("[更新] 当前已是最新版本" if self.last_status == "已是最新"
+                           else f"[更新] 检查失败: {self.last_check_error}")
             return False
         ver = info.get('version', '?')
         note = info.get('release_note', '')
@@ -426,7 +501,15 @@ class AutoUpdater:
         if force or self.ask_confirm_cb(prompt):
             tmp = self.download_update(info)
             if tmp:
-                return self.install_and_restart(tmp)
+                ok = self.install_and_restart(tmp)
+                if ok:
+                    self.last_status = "已触发安装"
+                    return True
+                self.last_status = "安装失败"
+                return False
+            self.last_status = "下载失败"
+            return False
+        self.last_status = "用户取消"
         return False
 
 
@@ -485,6 +568,34 @@ def _load_excluded_ip_networks(config_path: str = None) -> list:
 
 EXCLUDED_IP_NETWORKS = _load_excluded_ip_networks()
 EXCLUDED_IP_LABELS = {}  # IP -> 说明（来自外部Excel）
+
+def _load_update_config():
+    """从 config.ini [update] 段读取自定义更新源（内网部署用）。
+
+    返回 (version_urls, exe_urls) 两个 list；未配置该段或值为空/仅注释时返回 ([], [])，
+    调用方据此回退到内置 GitHub 源。支持 http/https 与本地/共享路径
+    （如 //server/share/version.json）；exe_urls 模板支持 {version} 占位符。
+    """
+    if not os.path.exists(os.path.join(runtime_dir, 'config.ini')):
+        return [], []
+    try:
+        _cfg = configparser.ConfigParser()
+        _cfg.read(os.path.join(runtime_dir, 'config.ini'), encoding='utf-8')
+        if not _cfg.has_section('update'):
+            return [], []
+        def _split(val):
+            out = []
+            for line in (val or '').splitlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                out.append(line)
+            return out
+        vu = _split(_cfg.get('update', 'version_urls', fallback=''))
+        eu = _split(_cfg.get('update', 'exe_urls', fallback=''))
+        return vu, eu
+    except Exception:
+        return [], []
 
 def is_excluded_ip(ip_str):
     try:
@@ -755,22 +866,55 @@ def download_xdb():
     return False
 
 def _get_requests_verify():
-    """返回 requests 可用的 verify 参数：frozen 模式下用 certifi 自带 CA，失败回退 False"""
+    """返回 requests 可用的 verify 参数。
+    - 若 certifi 的 CA bundle 实际可用（路径存在且能被 ssl 创建 context）则用该路径；
+    - 否则返回 True，让 requests 走默认/环境变量；
+    - 最终 SSL 若仍失败，调用方的降级逻辑会再降到 verify=False。"""
     try:
         if getattr(sys, 'frozen', False):
             try:
-                import certifi
+                import certifi, ssl
                 ca_path = certifi.where()
-                if os.path.exists(ca_path):
-                    # 让 requests 使用 certifi 的 CA bundle（PyInstaller frozen 模式找不到系统证书）
-                    os.environ.setdefault('REQUESTS_CA_BUNDLE', ca_path)
-                    os.environ.setdefault('SSL_CERT_FILE', ca_path)
-                    return ca_path
+                # PyInstaller certifi hook 有时把 cacert.pem 放到多个目录，
+                # certifi.where() 返回的路径虽 os.path.exists 为 True，
+                # 但 requests/urllib3 ssl.create_default_context(cafile=ca_path) 会报
+                # "Could not find a suitable TLS CA certificate bundle, invalid path"。
+                # 所以除了文件存在，还要用 ssl 模块实际验证一下该 PEM 能被加载。
+                if ca_path and os.path.isfile(ca_path) and os.path.getsize(ca_path) > 0:
+                    try:
+                        ctx = ssl.create_default_context(cafile=ca_path)
+                        # 没异常说明 cafile 合法
+                        # 但仍需要避免重复覆盖 REQUESTS_CA_BUNDLE（运行时 hook 已经设置过）
+                        if 'REQUESTS_CA_BUNDLE' not in os.environ:
+                            os.environ['REQUESTS_CA_BUNDLE'] = ca_path
+                        if 'SSL_CERT_FILE' not in os.environ:
+                            os.environ['SSL_CERT_FILE'] = ca_path
+                        return ca_path
+                    except Exception:
+                        # cafile 虽存在但不可用，直接返回 True（用系统默认），
+                        # 不设置环境变量避免干扰默认逻辑
+                        pass
             except Exception:
                 pass
         return True
     except Exception:
         return True
+
+def _is_ssl_or_ca_error(exc):
+    """判断异常是否属于 SSL/TLS/CA bundle 相关，意味着 verify=False 大概率可绕过。"""
+    import requests
+    _s = str(exc) + type(exc).__name__
+    _u = _s.upper()
+    if isinstance(exc, requests.exceptions.SSLError):
+        return True
+    for kw in ("SSL", "TLS", "CERTIFICATE", "CERTIFICATE_VERIFY_FAILED",
+              "CERTIFICATE BUNDLE", "INVALID PATH", "CERT", "HANDSHAKE",
+              "UNABLE TO GET LOCAL ISSUER CERTIFICATE"):
+        if kw in _u:
+            return True
+    if isinstance(exc, OSError) and ("CERTIFICATE" in _u or "BUNDLE" in _u or "INVALID PATH" in _u):
+        return True
+    return False
 
 def download_xdb():
     import requests
@@ -784,9 +928,7 @@ def download_xdb():
                 resp.raise_for_status()
             except Exception as exc:
                 # 如果是 SSL 相关错误且 verify 不是 False，则降级 verify=False 重试
-                is_ssl_err = ('SSL' in str(type(exc).__name__) or 'SSL' in str(exc)
-                              or 'CERTIFICATE' in str(exc).upper()
-                              or isinstance(exc, requests.exceptions.SSLError))
+                is_ssl_err = _is_ssl_or_ca_error(exc)
                 if is_ssl_err and verify is not False:
                     _log(f"  SSL验证失败，跳过证书验证重试...")
                     resp = requests.get(url, timeout=(30, 600), stream=True, verify=False)
@@ -913,7 +1055,7 @@ def query_online_batch(ips):
         chunk = public_ips[i: i + BATCH_SIZE]
         payload = [{"query": ip, "fields": fields} for ip in chunk]
         try:
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, timeout=30, verify=_get_requests_verify())
             resp.raise_for_status()
             for item in resp.json():
                 ip_addr = item.get("query", "")
@@ -2090,12 +2232,41 @@ class DailyReportGUI:
             done.wait()
             return result[0]
 
+        # A：更新源可配置——优先读取 config.ini [update] 段，未配置则回退内置 GitHub 源
+        cfg_vu, cfg_eu = _load_update_config()
         updater = AutoUpdater(
             progress_cb=self._set_progress,
             log_cb=self._log,
             ask_confirm_cb=ask_confirm,
+            version_urls=cfg_vu or None,
+            exe_urls=cfg_eu or None,
         )
         updater.run_update_flow(force_dialog=force_dialog)
+
+        # C：手动检查时显式反馈结果（含失败原因），避免用户以为"卡住/程序故障"
+        if force_dialog:
+            err = getattr(updater, 'last_check_error', None)
+            status = getattr(updater, 'last_status', None)
+            if err:
+                title, kind = "检查更新", "warning"
+                msg = (f"未能检查到新版本。\n原因：{err}\n\n"
+                       "建议：检查网络连接，或在 config.ini 的 [update] 段配置可达的内网更新源。")
+            elif status in ("下载失败", "安装失败"):
+                title, kind = "更新失败", "error"
+                msg = f"更新未完成（{status}）。请查看下方日志，或手动从发布渠道获取新版本。"
+            elif status == "用户取消":
+                return
+            else:
+                title, kind = "检查更新", "info"
+                msg = "当前已是最新版本。"
+            def _show():
+                try:
+                    (messagebox.showwarning if kind == "warning"
+                     else messagebox.showerror if kind == "error"
+                     else messagebox.showinfo)(title, msg)
+                except Exception:
+                    pass
+            self.master.after(0, _show)
 
 def update_worker_main(json_path):
     """
@@ -2122,6 +2293,7 @@ def update_worker_main(json_path):
         work_dir   = str(params['workDir'])
         cleanups   = [str(params['jsonPath'])]
         if 'ps1Path' in params and params['ps1Path']: cleanups.append(str(params['ps1Path']))
+        worker_exe = str(params.get('workerExe', ''))
     except Exception as e:
         # 尽量写日志（优先临时目录，避免 exe 目录无写权限）
         try:
@@ -2266,7 +2438,12 @@ def update_worker_main(json_path):
             wlog(f"startfile 启动也失败: {e2}")
 
     # ===== 清理临时文件 =====
-    for p in [new_exe, bak_exe] + cleanups:
+    # Worker 自身（sys.executable）正在运行，不能删除；其余可清理
+    _worker_self = os.path.abspath(sys.executable) if getattr(sys, 'frozen', False) else None
+    for p in [new_exe, bak_exe] + cleanups + ([worker_exe] if worker_exe else []):
+        if _worker_self and os.path.abspath(p) == _worker_self:
+            wlog(f"跳过清理（Worker自身）: {os.path.basename(p)}")
+            continue
         try:
             if os.path.exists(p):
                 os.remove(p)

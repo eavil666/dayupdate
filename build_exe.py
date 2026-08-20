@@ -66,7 +66,7 @@ def install_pyinstaller():
 
 
 def create_runtime_hook():
-    """创建运行时 hook 文件，用于设置 DLL 路径"""
+    """创建运行时 hook 文件，用于设置 DLL 路径和 certifi CA 证书路径"""
     runtime_hook_content = '''import os
 import sys
 
@@ -80,6 +80,19 @@ if getattr(sys, 'frozen', False):
                 os.add_dll_directory(full_path)
             except (OSError, AttributeError):
                 pass
+    # certifi.where() 补丁：PyInstaller 单文件模式下 cacert.pem 被放到
+    # _MEIPASS/certifi/cacert.pem，但 certifi.where() 默认指向错误路径。
+    # 提前设置 REQUESTS_CA_BUNDLE / SSL_CERT_FILE，requests 和 ssl 默认都会用。
+    _cacert = os.path.join(base_dir, 'certifi', 'cacert.pem')
+    if os.path.exists(_cacert):
+        os.environ['REQUESTS_CA_BUNDLE'] = _cacert
+        os.environ['SSL_CERT_FILE'] = _cacert
+        # 同时 monkey-patch certifi.where()，确保任何显式调用都返回正确路径
+        try:
+            import certifi as _certifi
+            _certifi.where = lambda _p=_cacert: _p
+        except Exception:
+            pass
 '''
     runtime_hook_file = os.path.join(script_dir, '_runtime_hook.py')
     with open(runtime_hook_file, 'w', encoding='utf-8') as f:
@@ -132,6 +145,16 @@ def build_exe():
     for fname in ('config.ini', 'office.ico'):
         if os.path.exists(os.path.join(script_dir, fname)):
             datas.append(f"('{fname}', '.')")
+    # 把 certifi 的 cacert.pem 作为 data 打包到 certifi/ 目录，避免 frozen 模式 certifi.where() 找不到
+    try:
+        import certifi
+        _cacert = certifi.where()
+        if os.path.exists(_cacert):
+            _src = _cacert.replace('\\', '/')
+            datas.append(f"(r'{_src}', 'certifi')")
+            print(f'[+] 打包 CA 证书: {_cacert}')
+    except Exception as _e:
+        print(f'[!] 未找到 certifi cacert.pem ({_e})，跳过')
     datas_str = ',\n        '.join(datas) if datas else ''
 
     spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
@@ -146,6 +169,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'pandas', 'numpy', 'openpyxl', 'docx', 'requests',
+        'certifi',
         'ip2region', 'ipaddress', 'configparser',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox', 'tkinter.filedialog',
         'tkinter.font',
