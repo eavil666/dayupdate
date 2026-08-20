@@ -185,23 +185,14 @@ class AutoUpdater:
         except ImportError:
             self.log_cb("[版本] 缺少 requests 库，跳过 GitHub API 检查")
             return None
-        verify = _get_requests_verify()
         try:
-            try:
-                r = requests.get(GITHUB_API_LATEST, timeout=10,
-                                 headers={'User-Agent': 'daily-report-updater'},
-                                 verify=verify)
-                r.raise_for_status()
-            except Exception as exc:
-                is_ssl_err = _is_ssl_or_ca_error(exc)
-                if is_ssl_err and verify is not False:
-                    self.log_cb('[版本] GitHub API SSL验证失败，跳过证书验证重试')
-                    r = requests.get(GITHUB_API_LATEST, timeout=10,
-                                     headers={'User-Agent': 'daily-report-updater'},
-                                     verify=False)
-                    r.raise_for_status()
-                else:
-                    raise
+            r = _safe_get(
+                GITHUB_API_LATEST,
+                timeout=10,
+                headers={'User-Agent': 'daily-report-updater'},
+                ssl_fallback_msg='[版本] GitHub API SSL验证失败，跳过证书验证重试',
+                log_cb=self.log_cb,
+            )
             data = r.json()
             tag = data.get('tag_name', '') or ''
             version = tag.lstrip('vV').strip()
@@ -233,23 +224,12 @@ class AutoUpdater:
         for url in self.version_urls:
             try:
                 if url.startswith('http://') or url.startswith('https://'):
-                    import requests
                     # CDN 防缓存：加 ?t=时间戳（raw 本身不缓存；ghproxy 镜像也不长缓存）
                     if '?' in url:
                         fetch_url = f"{url}&t={int(time.time())}"
                     else:
                         fetch_url = f"{url}?t={int(time.time())}"
-                    vf = _get_requests_verify()
-                    try:
-                        r = requests.get(fetch_url, timeout=10, verify=vf)
-                        r.raise_for_status()
-                    except Exception as exc:
-                        is_ssl_err = _is_ssl_or_ca_error(exc)
-                        if is_ssl_err and vf is not False:
-                            r = requests.get(fetch_url, timeout=10, verify=False)
-                            r.raise_for_status()
-                        else:
-                            raise
+                    r = _safe_get(fetch_url, timeout=10)
                     data = r.json()
                 else:
                     # 共享目录 / 本地文件
@@ -302,19 +282,11 @@ class AutoUpdater:
     def _download(self, url, dest_path, expected_md5=None):
         file_size = 0
         if url.startswith('http://') or url.startswith('https://'):
-            import requests
-            vf = _get_requests_verify()
-            try:
-                resp = requests.get(url, timeout=(30, 600), stream=True, verify=vf)
-                resp.raise_for_status()
-            except Exception as exc:
-                is_ssl_err = _is_ssl_or_ca_error(exc)
-                if is_ssl_err and vf is not False:
-                    self.log_cb('[更新] 下载SSL验证失败，跳过证书验证重试')
-                    resp = requests.get(url, timeout=(30, 600), stream=True, verify=False)
-                    resp.raise_for_status()
-                else:
-                    raise
+            resp = _safe_get(
+                url, timeout=(30, 600), stream=True,
+                ssl_fallback_msg='[更新] 下载SSL验证失败，跳过证书验证重试',
+                log_cb=self.log_cb,
+            )
             total = int(resp.headers.get('content-length', 0))
             if total > 0:
                 self.progress_cb(0, total)
@@ -841,39 +813,6 @@ def _set_progress(value, maximum=None):
     if _gui_progress_callback:
         _gui_progress_callback(value, maximum)
 
-def download_xdb():
-    import requests
-    for idx, url in enumerate(DOWNLOAD_SOURCES, 1):
-        try:
-            _log(f"[{idx}/{len(DOWNLOAD_SOURCES)}] 正在下载离线 IP 库: {url}")
-            resp = requests.get(url, timeout=(30, 600), stream=True)
-            resp.raise_for_status()
-            total = int(resp.headers.get('content-length', 0))
-            if total > 0:
-                _set_progress(0, total)
-            downloaded = 0
-            with open(XDB_FILE, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total > 0:
-                            _set_progress(downloaded, total)
-            size_kb = os.path.getsize(XDB_FILE) // 1024
-            if size_kb < 9000:
-                _log(f"文件大小异常({size_kb}KB)，尝试下一个地址")
-                os.remove(XDB_FILE)
-                continue
-            _log(f"已保存: {XDB_FILE} ({size_kb} KB)")
-            _set_progress(0, 0)
-            return True
-        except Exception as exc:
-            _log(f"下载失败: {exc}")
-            _set_progress(0, 0)
-    _log("所有下载地址均失败，将使用在线 API 查询")
-    _set_progress(0, 0)
-    return False
-
 def _get_requests_verify():
     """返回 requests 可用的 verify 参数。
     - 若 certifi 的 CA bundle 实际可用（路径存在且能被 ssl 创建 context）则用该路径；
@@ -925,27 +864,39 @@ def _is_ssl_or_ca_error(exc):
         return True
     return False
 
-def download_xdb():
+
+def _safe_get(url, ssl_fallback_msg=None, log_cb=None, **kwargs):
+    """requests.get 的 SSL 降级封装。
+
+    先按正常证书校验（verify=_get_requests_verify()）发起请求；
+    若遇 SSL/CA 相关错误，则降级为 verify=False 重试一次（绕过本机
+    内网对证书吊销 OCSP/CRL 的封锁）。其余异常原样上抛。
+    kwargs 透传给 requests.get（如 timeout / headers / stream）。
+    """
     import requests
     verify = _get_requests_verify()
+    try:
+        resp = requests.get(url, verify=verify, **kwargs)
+        resp.raise_for_status()
+        return resp
+    except Exception as exc:
+        if _is_ssl_or_ca_error(exc) and verify is not False:
+            if ssl_fallback_msg:
+                (log_cb or _log)(ssl_fallback_msg)
+            resp = requests.get(url, verify=False, **kwargs)
+            resp.raise_for_status()
+            return resp
+        raise
+
+
+def download_xdb():
     for idx, url in enumerate(DOWNLOAD_SOURCES, 1):
         try:
             _log(f"[{idx}/{len(DOWNLOAD_SOURCES)}] 正在下载离线 IP 库: {url}")
-            # 第一次尝试使用 verify（正常CA验证）
-            try:
-                resp = requests.get(url, timeout=(30, 600), stream=True, verify=verify)
-                resp.raise_for_status()
-            except Exception as exc:
-                # 如果是 SSL 相关错误且 verify 不是 False，则降级 verify=False 重试
-                is_ssl_err = _is_ssl_or_ca_error(exc)
-                if is_ssl_err and verify is not False:
-                    _log(f"  SSL验证失败，跳过证书验证重试...")
-                    resp = requests.get(url, timeout=(30, 600), stream=True, verify=False)
-                    resp.raise_for_status()
-                    # 首次 SSL 降级成功后，后续镜像也统一用 verify=False 提速
-                    verify = False
-                else:
-                    raise
+            resp = _safe_get(
+                url, timeout=(30, 600), stream=True,
+                ssl_fallback_msg="  SSL验证失败，跳过证书验证重试...",
+            )
             total = int(resp.headers.get('content-length', 0))
             if total > 0:
                 _set_progress(0, total)

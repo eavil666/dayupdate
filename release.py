@@ -4,23 +4,20 @@
 一键发布脚本 - 本地打包并上传到 GitHub Release
 
 使用方法:
-  1. 配置 GitHub Token（任选一种）:
-     方式A: 复制 .env.example 为 .env，填入 Token
+  1. 配置 GitHub Token：复制 .env.example 为 .env 并填入 Token
+     （也支持环境变量 GH_TOKEN / GITHUB_TOKEN，脚本自动读取，无需手动 export）
         copy .env.example .env
         notepad .env
-
-     方式B: 设置环境变量（重启终端生效）
-        setx GH_TOKEN "ghp_xxxxxxxxxxxxxxxxxxxx"
 
   2. 运行:
      python release.py                    # 自动从 main.py 读取版本号
      python release.py --version 1.1.0    # 指定新版本号
      python release.py --skip-build       # 跳过打包，仅上传已有 exe
 
-注意:
-  - .env 文件不会被提交（已在 .gitignore 中），Token 安全
-  - config.ini 不会被提交（已在 .gitignore 中）
-  - exe 文件不会被提交到 git，只上传到 Release
+说明:
+  - .env / config.ini / exe 均不入库（已在 .gitignore），Token 与产物安全
+  - 无需手动配置 git 或 insteadOf：git 推送的 token 鉴权与 Windows Schannel
+    证书吊销检查绕过，均由脚本通过子进程环境变量自动注入（不写任何 git 配置）
   - 需要网络可访问 github.com
 """
 
@@ -33,7 +30,6 @@ import argparse
 import subprocess
 import urllib.request
 import urllib.error
-import shutil
 
 # === Windows 控制台 UTF-8（避免中文乱码/UnicodeEncodeError）===
 if sys.platform == 'win32':
@@ -58,6 +54,9 @@ EXE_NAME_GH = 'daily-report.exe'              # GitHub Release asset 名（英�
 VERSION_JSON = 'version.json'
 MAIN_PY = 'main.py'
 EXE_PATH = os.path.join(script_dir, 'dist', EXE_NAME)
+
+# 匹配 main.py 中的 APP_VERSION 常量（read / set 共用，避免两处正则不一致）
+APP_VERSION_RE = re.compile(r'(APP_VERSION\s*=\s*["\'])([^"\']+)(["\'])')
 
 
 def log(msg, prefix='[+]'):
@@ -115,9 +114,9 @@ def read_app_version():
     """从 main.py 读取 APP_VERSION"""
     with open(os.path.join(script_dir, MAIN_PY), encoding='utf-8') as f:
         content = f.read()
-    m = re.search(r'APP_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+    m = APP_VERSION_RE.search(content)
     if m:
-        return m.group(1)
+        return m.group(2)
     return None
 
 
@@ -126,8 +125,7 @@ def set_app_version(version):
     path = os.path.join(script_dir, MAIN_PY)
     with open(path, encoding='utf-8') as f:
         content = f.read()
-    new_content, n = re.subn(
-        r'(APP_VERSION\s*=\s*["\'])([^"\']+)(["\'])',
+    new_content, n = APP_VERSION_RE.subn(
         rf'\g<1>{version}\g<3>',
         content,
         count=1
@@ -204,47 +202,65 @@ def update_version_json(version, md5):
     log(f'已更新 {VERSION_JSON}: version={version}, md5={md5}')
 
 
-def git_commit_tag_push(version):
-    """git add/commit/tag/push"""
-    # 注入 git 提交身份（避免 "Author identity unknown" 导致 commit 失败）；
-    # 用 setdefault：若用户已自行配置则尊重已有配置
-    os.environ.setdefault('GIT_AUTHOR_NAME', 'eavil666')
-    os.environ.setdefault('GIT_AUTHOR_EMAIL', 'eavil666@users.noreply.github.com')
-    os.environ.setdefault('GIT_COMMITTER_NAME', 'eavil666')
-    os.environ.setdefault('GIT_COMMITTER_EMAIL', 'eavil666@users.noreply.github.com')
+def git_commit_tag_push(version, token=None):
+    """git add/commit/tag/push。
+
+    SSL 吊销检查绕过 + GitHub token 鉴权，均通过环境变量局部注入给 git 子进程，
+    不写任何 git 配置（不污染全局配置，也不写 .git/config），子进程结束即失效。
+      - GIT_SSL_NO_VERIFY=true：绕过 Windows Schannel 的证书吊销检查
+        （内网封锁 OCSP/CRL 导致 fail-closed，根因见项目记忆）。
+      - GIT_CONFIG_KEY_0/VALUE_0：等价于
+        `git config url."https://x-access-token:TOKEN@github.com/".insteadOf https://github.com/`
+        仅对本次子进程生效，把 https 远端地址重写为带 token 的地址完成鉴权。
+    """
+    env = os.environ.copy()
+    # 提交身份：仅注入本次子命令，尊重用户已有配置
+    env.setdefault('GIT_AUTHOR_NAME', 'eavil666')
+    env.setdefault('GIT_AUTHOR_EMAIL', 'eavil666@users.noreply.github.com')
+    env.setdefault('GIT_COMMITTER_NAME', 'eavil666')
+    env.setdefault('GIT_COMMITTER_EMAIL', 'eavil666@users.noreply.github.com')
+
+    # 局部绕过证书吊销检查（不影响全局/仓库配置）
+    env['GIT_SSL_NO_VERIFY'] = 'true'
+
+    # 局部注入 token 鉴权（仅当前子进程，零写盘）
+    if token:
+        env['GIT_CONFIG_COUNT'] = '1'
+        env['GIT_CONFIG_KEY_0'] = f'url.https://x-access-token:{token}@github.com/.insteadOf'
+        env['GIT_CONFIG_VALUE_0'] = 'https://github.com/'
     log('提交代码到 git...')
     subprocess.run(['git', 'add', MAIN_PY, VERSION_JSON, 'config.ini.example',
                     'release.py', 'build_exe.py'],
-                   cwd=script_dir, check=True)
+                   cwd=script_dir, check=True, env=env)
     # 检查是否有改动
-    result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=script_dir)
+    result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=script_dir, env=env)
     if result.returncode == 0:
         log_warn('无代码改动，跳过 commit')
     else:
         subprocess.run(
             ['git', 'commit', '-m', f'release: v{version}'],
-            cwd=script_dir, check=True
+            cwd=script_dir, check=True, env=env
         )
 
     # 删除已存在的 tag（如果重复发布）
     subprocess.run(['git', 'tag', '-d', f'v{version}'],
-                   cwd=script_dir, capture_output=True)
+                   cwd=script_dir, capture_output=True, env=env)
     subprocess.run(['git', 'push', 'origin', f':refs/tags/v{version}'],
-                   cwd=script_dir, capture_output=True)
+                   cwd=script_dir, capture_output=True, env=env)
 
     # 创建新 tag
     subprocess.run(
         ['git', 'tag', '-a', f'v{version}', '-m', f'Release v{version}'],
-        cwd=script_dir, check=True
+        cwd=script_dir, check=True, env=env
     )
     log(f'已创建 tag: v{version}')
 
     # push 代码和 tag
     log('推送到 GitHub...')
     subprocess.run(['git', 'push', '-u', 'origin', 'main'],
-                   cwd=script_dir, check=True)
+                   cwd=script_dir, check=True, env=env)
     subprocess.run(['git', 'push', 'origin', f'v{version}'],
-                   cwd=script_dir, check=True)
+                   cwd=script_dir, check=True, env=env)
     log('代码和 tag 推送完成')
 
 
@@ -384,7 +400,7 @@ def main():
 
     # 5. git commit/tag/push
     try:
-        git_commit_tag_push(version)
+        git_commit_tag_push(version, token)
     except subprocess.CalledProcessError as e:
         log_err(f'git 操作失败: {e}')
         sys.exit(1)
