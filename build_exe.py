@@ -31,6 +31,23 @@ def get_git_version():
     return None
 
 
+def get_pyproject_version():
+    """从 pyproject.toml [project].version 读取版本号（单一真源，失败返回 None）"""
+    try:
+        import tomllib  # py3.11+
+    except ImportError:
+        import tomli as tomllib  # py3.10 兜底（若已安装）
+    try:
+        with open(os.path.join(script_dir, 'pyproject.toml'), 'rb') as f:
+            data = tomllib.load(f)
+        version = str(data['project']['version']).strip()
+        if version and re.match(r'^\d+(\.\d+)*$', version):
+            return version
+    except Exception:
+        pass
+    return None
+
+
 def set_app_version(version):
     """将 main.py 中的 APP_VERSION 常量修改为指定版本号"""
     main_file = os.path.join(script_dir, 'main.py')
@@ -277,18 +294,23 @@ def main():
     print('网络安全值守日报 - 打包工具（单文件模式）')
     print('=' * 60)
 
-    # 版本号解析：--version > git tag > 保持不变
+    # 版本号解析：--version > pyproject.toml（单一真源）> Git 标签 > 保持不变
     target_version = None
     if args.version:
         target_version = args.version.strip()
         print(f'[+] 使用命令行指定版本号: {target_version}')
     else:
-        git_ver = get_git_version()
-        if git_ver:
-            target_version = git_ver
-            print(f'[+] 使用 Git 标签版本号: {target_version}')
+        pp_ver = get_pyproject_version()
+        if pp_ver:
+            target_version = pp_ver
+            print(f'[+] 使用 pyproject.toml 版本号: {target_version}')
         else:
-            print('[!] 未指定版本号且无 Git 标签，将使用 main.py 中现有版本')
+            git_ver = get_git_version()
+            if git_ver:
+                target_version = git_ver
+                print(f'[+] 使用 Git 标签版本号: {target_version}')
+            else:
+                print('[!] 未获取到版本号，将使用 main.py 中现有版本')
 
     if target_version:
         set_app_version(target_version)

@@ -57,6 +57,38 @@ EXE_PATH = os.path.join(script_dir, 'dist', EXE_NAME)
 
 # 匹配 main.py 中的 APP_VERSION 常量（read / set 共用，避免两处正则不一致）
 APP_VERSION_RE = re.compile(r'(APP_VERSION\s*=\s*["\'])([^"\']+)(["\'])')
+PYPROJECT = 'pyproject.toml'
+
+
+def get_pyproject_version():
+    """从 pyproject.toml [project].version 读取版本号（单一真源，失败返回 None）"""
+    try:
+        import tomllib  # py3.11+
+    except ImportError:
+        import tomli as tomllib  # py3.10 兜底（若已安装）
+    try:
+        with open(os.path.join(script_dir, PYPROJECT), 'rb') as f:
+            return str(tomllib.load(f)['project']['version']).strip()
+    except Exception:
+        return None
+
+
+def set_pyproject_version(version):
+    """同步 pyproject.toml [project].version（单一真源）"""
+    path = os.path.join(script_dir, PYPROJECT)
+    if not os.path.exists(path):
+        return False
+    try:
+        src = open(path, encoding='utf-8').read()
+        new_src, n = re.subn(r'(?m)^version\s*=\s*["\']([^"\']+)["\']',
+                             f'version = "{version}"', src, count=1)
+        if n == 0:
+            return False
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_src)
+        return True
+    except Exception:
+        return False
 
 
 def log(msg, prefix='[+]'):
@@ -111,7 +143,10 @@ def get_github_token():
 
 
 def read_app_version():
-    """从 main.py 读取 APP_VERSION"""
+    """读取版本号：优先 pyproject.toml（单一真源），回退 main.py APP_VERSION"""
+    v = get_pyproject_version()
+    if v:
+        return v
     with open(os.path.join(script_dir, MAIN_PY), encoding='utf-8') as f:
         content = f.read()
     m = APP_VERSION_RE.search(content)
@@ -374,14 +409,19 @@ def main():
     # 2. 确定版本号
     if args.version:
         version = args.version.strip()
-        if not set_app_version(version):
-            sys.exit(1)
+        # 同步单一真源 pyproject.toml（release 流程只改这一处版本声明）
+        if not set_pyproject_version(version):
+            log_warn('pyproject.toml 未找到 version 行，跳过同步')
     else:
         version = read_app_version()
         if not version:
-            log_err('无法从 main.py 读取 APP_VERSION')
+            log_err('无法读取版本号（pyproject.toml / main.py）')
             sys.exit(1)
         log(f'当前版本: v{version}')
+
+    # 同步 main.py APP_VERSION（exe 内嵌版本以 main.py 为准，必须与发布版本一致）
+    if not set_app_version(version):
+        sys.exit(1)
 
     # 3. 打包（传入版本号，防止 build_exe.py 从 git 标签覆写成旧版本）
     if not args.skip_build:
