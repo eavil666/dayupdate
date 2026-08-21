@@ -242,3 +242,18 @@ def test_load_config_enhance_from_alerts(tmp_path, monkeypatch):
     assert '长春' in conf['geos']
     assert conf['retention'] == 180       # 其余默认值不受影响
     assert conf['probes'] == []           # 探针 sheet 为空
+
+
+def test_load_config_custom_geos(tmp_path, monkeypatch):
+    """GUI 自定义 local_geos（逗号分隔）与 config 兜底合并"""
+    import ipdb
+    monkeypatch.setattr(ipdb, '_auto_load_excluded_ips', lambda: None)
+    monkeypatch.setattr(ipdb, 'load_terminal_ip_table', lambda: {})
+    monkeypatch.setattr(ipdb, 'load_probes_from_excel', lambda: [])
+    # config 缺失 → 无兜底关键词
+    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(tmp_path / 'none.ini'))
+    conf = ipdb.load_config(files=[], local_geos='长春,上海')
+    assert conf['geos'] == {'长春', '上海'}
+    # 空/空白输入 → 无新增
+    conf2 = ipdb.load_config(files=[], local_geos='  ')
+    assert conf2['geos'] == set()

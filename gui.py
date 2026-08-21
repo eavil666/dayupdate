@@ -109,6 +109,16 @@ class DailyReportGUI:
         Entry(date_frame, textvariable=self.date_var, width=12,
               font=('宋体', 10)).pack(side='left', padx=5)
 
+        # 本地归属地关键词（标记本地IP用，逗号分隔；与告警自动提取值合并）
+        geos_frame = Frame(self.master, padx=10, pady=3)
+        geos_frame.pack(fill='x')
+        Label(geos_frame, text='本地归属地:', font=('宋体', 10)).pack(side='left')
+        self.local_geos_var = StringVar(value='长春')
+        Entry(geos_frame, textvariable=self.local_geos_var, width=28,
+              font=('宋体', 10)).pack(side='left', padx=5)
+        Label(geos_frame, text='(逗号分隔，自动与告警提取合并)', font=('宋体', 9),
+              fg='gray').pack(side='left')
+
         # 重点工作总结输入区域
         work_frame = Frame(self.master, padx=10, pady=3)
         work_frame.pack(fill='x')
@@ -341,6 +351,9 @@ class DailyReportGUI:
                 try:
                     date = self.date_var.get()
 
+                    # 获取用户输入的本地归属地关键词（逗号分隔；空则仅用自动提取）
+                    local_geos = self.local_geos_var.get().strip() or None
+
                     # 获取用户输入的重点工作总结
                     work_summary = self.work_summary_text.get('1.0', END).strip()
 
@@ -359,7 +372,7 @@ class DailyReportGUI:
                     self._log('=' * 50)
 
                     path_objects = [Path(f) for f in self.input_files]
-                    self.ip_report_path = generate_ip_report(path_objects, date)
+                    self.ip_report_path = generate_ip_report(path_objects, date, local_geos=local_geos)
                     self._log(f'IP归属分析完成: {self.ip_report_path}')
 
                     self._log('')
@@ -367,7 +380,7 @@ class DailyReportGUI:
                     self._log('步骤2: 生成值守日报')
                     self._log('=' * 50)
 
-                    self.daily_report_path = generate_daily_report(path_objects, date, work_summary, follow_items, intel_items)
+                    self.daily_report_path = generate_daily_report(path_objects, date, work_summary, follow_items, intel_items, local_geos=local_geos)
                     self._log(f'值守日报生成完成: {self.daily_report_path}')
 
                     self._log('')

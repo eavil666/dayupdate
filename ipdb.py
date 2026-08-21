@@ -595,12 +595,13 @@ def extract_source_ips(file_path):
         internal_ips = internal_df['源 IP'].drop_duplicates().tolist()
     return external_ips, internal_ips, excluded_ips
 
-def load_config(files=None):
+def load_config(files=None, local_geos=None):
     """读取配置：config.ini 为兜底 + 从文件自动获取（解放 config 硬编码）。
 
     files：本次生成的安全告警文件列表（Path）。提供时：
       - internal_zones ← 告警"源区域"列自动提取（config 值合并兜底）
       - local_geos    ← 告警"源地理信息"列提取"长春"等（config 值合并兜底）
+    local_geos：GUI 自定义输入（逗号分隔，如 "长春,上海"），与自动提取值合并。
     excluded_ips ← 业务ip.xlsx 自动加载（模块级 EXCLUDED_IP_NETWORKS）。
     probes       ← 业务ip.xlsx[探针]sheet 优先，否则 config [health] probes。
     """
@@ -667,13 +668,18 @@ def load_config(files=None):
         alert_geos = extract_geos_from_alerts(files)
         if alert_geos:
             conf['geos'] |= alert_geos
+    # GUI 自定义本地归属地关键词（逗号分隔）与自动提取合并
+    if local_geos:
+        custom = {x.strip() for x in str(local_geos).split(',') if x.strip()}
+        if custom:
+            conf['geos'] |= custom
     # probes：业务ip.xlsx[探针]sheet 优先（config [health] probes 作为兜底）
     excel_probes = load_probes_from_excel()
     if excel_probes:
         conf['probes'] = excel_probes
     return conf
 
-def generate_ip_report(files, date):
+def generate_ip_report(files, date, local_geos=None):
     all_external_ips = set()
     all_internal_ips = set()
     all_excluded_ips = set()
@@ -694,13 +700,13 @@ def generate_ip_report(files, date):
     # 查询排除IP的归属地
     excluded_location_map = query_all_ips(excluded_ip_list) if excluded_ip_list else {}
     load_terminal_ip_table()
-    # 加载 local_geos 配置用于标记本地IP（传入 files 自动从告警提取区域/归属地）
+    # 加载 local_geos 配置用于标记本地IP（传入 files 自动从告警提取区域/归属地；local_geos 为 GUI 自定义）
     try:
-        conf = load_config(files)
-        local_geos = conf.get('geos', set())
+        conf = load_config(files, local_geos=local_geos)
+        local_geos_set = conf.get('geos', set())
     except Exception as e:
         _log(f'[!] 加载配置失败，local_geos 回退为空: {e}')
-        local_geos = set()
+        local_geos_set = set()
     # 使用 runtime_dir（脚本/exe所在目录）作为输出基础目录
     out_dir = Path(runtime_dir) / 'output'
     out_dir.mkdir(exist_ok=True)
@@ -729,7 +735,7 @@ def generate_ip_report(files, date):
         # 检查是否为本地IP
         remark = ''
         is_local = False
-        if local_geos and any(g in str(location) for g in local_geos):
+        if local_geos_set and any(g in str(location) for g in local_geos_set):
             remark = '本地IP'
             is_local = True
         ws1.append([idx, ip, location, remark])
