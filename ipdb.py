@@ -205,6 +205,7 @@ def extract_geos_from_alerts(files):
 def load_probes_from_excel():
     """从 业务ip.xlsx 的"探针"sheet 读取探针（列：名称 | IP地址）。
 
+    sheet 名模糊匹配（含"探针"即可，如 探针 / 探针ip段 / 探针配置）。
     无该 sheet 或无有效行时返回 []（回退 config.ini [health] probes）。
     """
     path = _find_file('业务ip.xlsx')
@@ -213,9 +214,10 @@ def load_probes_from_excel():
     try:
         import pandas as pd
         xl = pd.ExcelFile(path)
-        if '探针' not in xl.sheet_names:
+        probe_sheet = next((s for s in xl.sheet_names if '探针' in s), None)
+        if not probe_sheet:
             return []
-        df = pd.read_excel(path, sheet_name='探针')
+        df = pd.read_excel(path, sheet_name=probe_sheet)
         df.columns = df.columns.str.strip()
         name_col = '名称' if '名称' in df.columns else df.columns[0]
         ip_col = next((c for c in ('IP地址', 'IP', 'ip') if c in df.columns), df.columns[1] if len(df.columns) > 1 else name_col)
@@ -226,7 +228,7 @@ def load_probes_from_excel():
             if name and ip and ip.lower() != 'nan':
                 rows.append((name, ip))
         if rows:
-            _log(f'[+] 从业务ip.xlsx[探针]加载探针: {len(rows)} 个')
+            _log(f'[+] 从业务ip.xlsx[{probe_sheet}]加载探针: {len(rows)} 个')
         return rows
     except Exception as e:
         _log(f'[!] 读取探针sheet失败: {e}')
