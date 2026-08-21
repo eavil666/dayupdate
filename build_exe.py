@@ -190,7 +190,7 @@ a = Analysis(
         'ip2region', 'ipaddress', 'configparser',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox', 'tkinter.filedialog',
         'tkinter.font',
-        'common', 'updater',
+        'common', 'updater', 'ipdb', 'report', 'gui',
     ],
     hookspath=[],
     hooksconfig={{}},

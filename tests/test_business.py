@@ -74,7 +74,9 @@ def test_parse_ip_range():
 
 
 def test_is_excluded_ip(monkeypatch):
-    monkeypatch.setattr(main, 'EXCLUDED_IP_NETWORKS',
+    # 拆分后 is_excluded_ip 读取的是 ipdb 模块的全局状态，须 patch ipdb
+    import ipdb
+    monkeypatch.setattr(ipdb, 'EXCLUDED_IP_NETWORKS',
                         [ipaddress.ip_network('10.0.0.0/8'),
                          ipaddress.ip_address('192.168.9.9')])
     assert main.is_excluded_ip('10.1.2.3') is True
