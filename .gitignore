@@ -47,8 +47,8 @@ ip2region_v4.xdb
 # === 二进制工具 ===
 upx.exe
 
-# === 配置文件（含真实IP/网段，敏感，不提交）===
-config.ini
+# === 配置文件 ===
+# config.ini 已脱敏（业务IP/探针已移至 Excel 自动读取，仅剩结构参数与内网保留段），随仓库提交
 
 # === 环境变量文件（含 GitHub Token，敏感，不提交）===
 .env

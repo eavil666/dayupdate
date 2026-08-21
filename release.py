@@ -282,9 +282,9 @@ def git_commit_tag_push(version, token=None, branch='main'):
         env['GIT_CONFIG_KEY_0'] = f'url.https://x-access-token:{token}@github.com/.insteadOf'
         env['GIT_CONFIG_VALUE_0'] = 'https://github.com/'
     log('提交代码到 git...')
-    # pyproject.toml 为版本单一真源，发布版本变更必须随发布 commit 入库
-    subprocess.run(['git', 'add', MAIN_PY, PYPROJECT, VERSION_JSON, 'config.ini.example',
-                    'release.py', 'build_exe.py'],
+    # pyproject.toml 为版本单一真源；config.ini 已脱敏随仓库提交，发布变更一并入库
+    subprocess.run(['git', 'add', MAIN_PY, PYPROJECT, VERSION_JSON, 'config.ini',
+                    'config.ini.example', 'release.py', 'build_exe.py'],
                    cwd=script_dir, check=True, env=env)
     # 检查是否有改动
     result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=script_dir, env=env)
