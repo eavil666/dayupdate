@@ -83,3 +83,40 @@ def test_is_excluded_ip(monkeypatch):
     assert main.is_excluded_ip('192.168.9.9') is True
     assert main.is_excluded_ip('8.8.8.8') is False
     assert main.is_excluded_ip('bad') is False
+
+
+def test_load_config_missing_sections(tmp_path, monkeypatch):
+    """config.ini 缺失/缺段/非法整数时回退默认值，不崩溃（P0 容错加固）"""
+    import ipdb
+    monkeypatch.setattr(ipdb, 'load_terminal_ip_table', lambda: {})
+
+    # 1) config.ini 完全不存在
+    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(tmp_path / 'nope.ini'))
+    conf = ipdb.load_config()
+    assert conf['title'] == '网络安全值守保障日报'
+    assert conf['pattern'] == '*.xlsx'
+    assert conf['out_dir'] == 'output'
+    assert conf['intel_file'] == 'intel.csv'
+    assert conf['nets'] == []
+    assert conf['probes'] == []
+    assert conf['retention'] == 180
+    assert conf['top'] == 5
+    assert conf['crit_levels'] == {'严重', '高危'}
+    assert conf['ban_levels'] == {'高危', '严重'}
+
+    # 2) 残缺 config（只有 [base] 一段）
+    broken = tmp_path / 'broken.ini'
+    broken.write_text('[base]\nreport_title = 测试日报\n', encoding='utf-8')
+    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(broken))
+    conf2 = ipdb.load_config()
+    assert conf2['title'] == '测试日报'       # base 段生效
+    assert conf2['retention'] == 180          # health 段缺失回退
+    assert conf2['top'] == 5                  # report 段缺失回退
+    assert conf2['probes'] == []              # health 段缺失回退
+
+    # 3) 非法整数（log_retention_days = abc）回退默认
+    bad = tmp_path / 'bad.ini'
+    bad.write_text('[health]\nlog_retention_days = abc\n', encoding='utf-8')
+    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(bad))
+    conf3 = ipdb.load_config()
+    assert conf3['retention'] == 180

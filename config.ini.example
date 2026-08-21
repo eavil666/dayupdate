@@ -26,3 +26,13 @@ log_retention_days =
 top_events =
 critical_levels =
 ban_levels =
+
+[update]
+# 可选：自定义更新源（内网部署用）。留空/删段则使用内置 GitHub 源。
+# version_urls 支持 http(s) 与本地/共享路径；exe_urls 支持 {version} 占位符
+# 示例：
+# version_urls =
+#   http://intranet-server/apps/report/version.json
+#   \\\\file-server\\share\\report\\version.json
+# exe_urls =
+#   http://intranet-server/apps/report/daily-report-{version}.exe

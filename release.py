@@ -13,11 +13,13 @@
      python release.py                    # 自动从 main.py 读取版本号
      python release.py --version 1.1.0    # 指定新版本号
      python release.py --skip-build       # 跳过打包，仅上传已有 exe
+     python release.py --branch refactor/b-module-split   # 发布到指定分支（默认当前分支）
 
 说明:
   - .env / config.ini / exe 均不入库（已在 .gitignore），Token 与产物安全
   - 无需手动配置 git 或 insteadOf：git 推送的 token 鉴权与 Windows Schannel
     证书吊销检查绕过，均由脚本通过子进程环境变量自动注入（不写任何 git 配置）
+  - 发布目标分支默认取当前 git 分支，用 --branch 显式指定（分支开发不触碰 main）
   - 需要网络可访问 github.com
 """
 
@@ -237,11 +239,27 @@ def update_version_json(version, md5):
     log(f'已更新 {VERSION_JSON}: version={version}, md5={md5}')
 
 
-def git_commit_tag_push(version, token=None):
+def get_current_branch():
+    """获取当前 git 分支名；失败回退 'main'"""
+    try:
+        r = subprocess.run(['git', 'branch', '--show-current'],
+                           cwd=script_dir, capture_output=True, text=True, timeout=15)
+        b = (r.stdout or '').strip()
+        if r.returncode == 0 and b:
+            return b
+    except Exception:
+        pass
+    log_warn('无法获取当前分支，回退默认分支 main')
+    return 'main'
+
+
+def git_commit_tag_push(version, token=None, branch='main'):
     """git add/commit/tag/push。
 
-    SSL 吊销检查绕过 + GitHub token 鉴权，均通过环境变量局部注入给 git 子进程，
-    不写任何 git 配置（不污染全局配置，也不写 .git/config），子进程结束即失效。
+    分支参数：发布目标分支（默认 'main'；分支开发场景传 refactor/xxx 即可，
+    不会触碰 main）。SSL 吊销检查绕过 + GitHub token 鉴权，均通过环境变量
+    局部注入给 git 子进程，不写任何 git 配置（不污染全局配置，也不写
+    .git/config），子进程结束即失效。
       - GIT_SSL_NO_VERIFY=true：绕过 Windows Schannel 的证书吊销检查
         （内网封锁 OCSP/CRL 导致 fail-closed，根因见项目记忆）。
       - GIT_CONFIG_KEY_0/VALUE_0：等价于
@@ -264,7 +282,8 @@ def git_commit_tag_push(version, token=None):
         env['GIT_CONFIG_KEY_0'] = f'url.https://x-access-token:{token}@github.com/.insteadOf'
         env['GIT_CONFIG_VALUE_0'] = 'https://github.com/'
     log('提交代码到 git...')
-    subprocess.run(['git', 'add', MAIN_PY, VERSION_JSON, 'config.ini.example',
+    # pyproject.toml 为版本单一真源，发布版本变更必须随发布 commit 入库
+    subprocess.run(['git', 'add', MAIN_PY, PYPROJECT, VERSION_JSON, 'config.ini.example',
                     'release.py', 'build_exe.py'],
                    cwd=script_dir, check=True, env=env)
     # 检查是否有改动
@@ -290,9 +309,9 @@ def git_commit_tag_push(version, token=None):
     )
     log(f'已创建 tag: v{version}')
 
-    # push 代码和 tag
-    log('推送到 GitHub...')
-    subprocess.run(['git', 'push', '-u', 'origin', 'main'],
+    # push 代码和 tag（目标分支由调用方指定，分支开发不触碰 main）
+    log(f'推送到 GitHub（分支 {branch}）...')
+    subprocess.run(['git', 'push', '-u', 'origin', branch],
                    cwd=script_dir, check=True, env=env)
     subprocess.run(['git', 'push', 'origin', f'v{version}'],
                    cwd=script_dir, check=True, env=env)
@@ -393,6 +412,8 @@ def main():
     parser = argparse.ArgumentParser(description='本地打包并发布到 GitHub Release')
     parser.add_argument('--version', '-V', type=str, default=None,
                         help='指定版本号（如 1.1.0），默认从 main.py 读取')
+    parser.add_argument('--branch', '-b', type=str, default=None,
+                        help='发布目标分支（默认当前 git 分支；分支开发场景传 refactor/xxx 即可，不触碰 main）')
     parser.add_argument('--skip-build', action='store_true',
                         help='跳过打包步骤，直接上传已有 exe')
     args = parser.parse_args()
@@ -423,6 +444,10 @@ def main():
     if not set_app_version(version):
         sys.exit(1)
 
+    # 确定发布分支（--branch 优先，否则当前 git 分支；分支开发不触碰 main）
+    branch = args.branch or get_current_branch()
+    log(f'发布目标分支: {branch}')
+
     # 3. 打包（传入版本号，防止 build_exe.py 从 git 标签覆写成旧版本）
     if not args.skip_build:
         if not run_build(version):
@@ -438,9 +463,9 @@ def main():
     log(f'exe MD5: {md5}')
     update_version_json(version, md5)
 
-    # 5. git commit/tag/push
+    # 5. git commit/tag/push（到指定分支）
     try:
-        git_commit_tag_push(version, token)
+        git_commit_tag_push(version, token, branch)
     except subprocess.CalledProcessError as e:
         log_err(f'git 操作失败: {e}')
         sys.exit(1)
@@ -457,7 +482,7 @@ def main():
     print('=' * 60)
     print('[OK] 发布完成! v{}'.format(version))
     print(f'    Release: https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{version}')
-    print(f'    version.json: https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/version.json')
+    print(f'    version.json: https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{branch}/version.json')
     print('=' * 60)
 
 

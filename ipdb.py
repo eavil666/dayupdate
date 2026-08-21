@@ -485,15 +485,36 @@ def extract_source_ips(file_path):
 
 def load_config():
     cfg = configparser.ConfigParser()
-    # 优先从exe目录读取，其次从临时解压目录
+    # 优先从exe目录读取，其次从临时解压目录；缺失时全部回退默认值（不崩溃）
     config_path = _find_file('config.ini')
-    cfg.read(config_path, encoding='utf-8')
+    if not config_path or not os.path.exists(config_path):
+        _log('[!] config.ini 不存在，全部使用默认配置')
+    else:
+        try:
+            cfg.read(config_path, encoding='utf-8')
+        except Exception as e:
+            _log(f'[!] 读取 config.ini 失败: {e}，全部使用默认配置')
+
+    def _get(section, option, fallback=''):
+        """缺段/缺键均回退默认值，避免 KeyError / NoSectionError"""
+        if cfg.has_option(section, option):
+            return cfg.get(section, option)
+        return fallback
+
+    def _getint(section, option, fallback=0):
+        if cfg.has_option(section, option):
+            try:
+                return cfg.getint(section, option)
+            except ValueError:
+                _log(f'[!] config.ini [{section}] {option} 不是整数，使用默认 {fallback}')
+        return fallback
+
     conf = {}
-    conf['title'] = cfg['base'].get('report_title', fallback='网络安全值守保障日报')
-    conf['pattern'] = cfg['base'].get('input_pattern', fallback='*.xlsx')
-    conf['out_dir'] = cfg['base'].get('output_dir', fallback='output')
-    conf['intel_file'] = cfg['base'].get('intel_file', fallback='intel.csv')
-    ranges_raw = cfg['network'].get('ranges', fallback='')
+    conf['title'] = _get('base', 'report_title', '网络安全值守保障日报')
+    conf['pattern'] = _get('base', 'input_pattern', '*.xlsx')
+    conf['out_dir'] = _get('base', 'output_dir', 'output')
+    conf['intel_file'] = _get('base', 'intel_file', 'intel.csv')
+    ranges_raw = _get('network', 'ranges', '')
     nets = [ipaddress.ip_network(x.strip()) for x in ranges_raw.splitlines()
             if x.strip() and not x.strip().startswith('#')]
     terminal_ips = set()
@@ -505,15 +526,15 @@ def load_config():
         nets.extend(terminal_nets)
         _log(f'[+] 加载终端IP地址表: {len(terminal_ips)}个IP, 合并为{len(terminal_nets)}个网段')
     conf['nets'] = nets
-    conf['zones'] = {x.strip() for x in cfg['network'].get('internal_zones', '').split(',') if x.strip()}
-    conf['geos'] = {x.strip() for x in cfg['network'].get('local_geos', '').split(',') if x.strip()}
-    probes_raw = cfg['health'].get('probes', fallback='')
+    conf['zones'] = {x.strip() for x in _get('network', 'internal_zones', '').split(',') if x.strip()}
+    conf['geos'] = {x.strip() for x in _get('network', 'local_geos', '').split(',') if x.strip()}
+    probes_raw = _get('health', 'probes', '')
     conf['probes'] = [tuple(x.strip().split('|')) for x in probes_raw.splitlines()
                       if x.strip() and not x.strip().startswith('#') and '|' in x]
-    conf['retention'] = cfg['health'].getint('log_retention_days', fallback=180)
-    conf['top'] = cfg['report'].getint('top_events', fallback=5)
-    conf['crit_levels'] = {x.strip() for x in cfg['report'].get('critical_levels', '严重,高危').split(',') if x.strip()}
-    conf['ban_levels'] = {x.strip() for x in cfg['report'].get('ban_levels', '高危,严重').split(',') if x.strip()}
+    conf['retention'] = _getint('health', 'log_retention_days', 180)
+    conf['top'] = _getint('report', 'top_events', 5)
+    conf['crit_levels'] = {x.strip() for x in _get('report', 'critical_levels', '严重,高危').split(',') if x.strip()}
+    conf['ban_levels'] = {x.strip() for x in _get('report', 'ban_levels', '高危,严重').split(',') if x.strip()}
     return conf
 
 def generate_ip_report(files, date):
