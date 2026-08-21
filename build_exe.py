@@ -12,6 +12,21 @@ import shutil
 import re
 import argparse
 
+# === Windows 控制台 UTF-8（避免中文乱码/UnicodeEncodeError）===
+# CI runner 上 stdout 默认 cp1252，无法编码中文；与 release.py 保持一致。
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:
+        pass
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 
