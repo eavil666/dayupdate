@@ -147,6 +147,10 @@ def safe_get(url, ssl_fallback_msg=None, log_cb=None, **kwargs):
     若遇 SSL/CA 相关错误，则降级为 verify=False 重试一次（绕过本机
     内网对证书吊销 OCSP/CRL 的封锁）。其余异常原样上抛。
     kwargs 透传给 requests.get（如 timeout / headers / stream）。
+
+    设计原则：降级重试对调用方完全透明——SSL 降级只在网络层生效，
+    不污染用户日志；只在降级**也失败**时由调用方 catch 后打印原因，
+    避免成功路径被 "SSL验证失败" 这种误报信息打扰。
     """
     import requests
     verify = get_requests_verify()
@@ -156,8 +160,6 @@ def safe_get(url, ssl_fallback_msg=None, log_cb=None, **kwargs):
         return resp
     except Exception as exc:
         if is_ssl_or_ca_error(exc) and verify is not False:
-            if ssl_fallback_msg:
-                (log_cb or _log)(ssl_fallback_msg)
             resp = requests.get(url, verify=False, **kwargs)
             resp.raise_for_status()
             return resp

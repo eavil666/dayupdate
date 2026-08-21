@@ -96,6 +96,24 @@ def test_safe_get_non_ssl_raises(fake_requests):
         updater.safe_get('http://c')
 
 
+def test_safe_get_ssl_fallback_silent(fake_requests, monkeypatch):
+    """降级重试成功后不应打印 ssl_fallback_msg（成功路径对用户透明）。
+
+    用户反馈：之前每次启动都会看到 "SSL验证失败，跳过证书验证重试"，
+    即使重试成功也显示，造成误报。修复后只有真正失败时才有提示。
+    """
+    import common
+    logs = []
+    monkeypatch.setattr(common, '_log', logs.append)
+    monkeypatch.setattr(common, 'set_gui_callbacks', lambda *a, **k: None)
+    fake = _FakeRequests(ssl_break=True)
+    fake_requests(fake)
+    r = updater.safe_get('http://a', ssl_fallback_msg='不应打印', timeout=10)
+    assert r.status == 200
+    assert len(fake.calls) == 2  # 确认走了降级路径
+    assert logs == []  # 但用户日志完全无干扰
+
+
 # ---------- load_update_config ----------
 
 def test_load_update_config_reads_section(tmp_path, monkeypatch):
