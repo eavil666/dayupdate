@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 一键发布脚本 - 本地打包并上传到 GitHub Release
 
@@ -23,15 +22,15 @@
   - 需要网络可访问 github.com
 """
 
-import os
-import sys
-import json
-import re
-import hashlib
 import argparse
+import hashlib
+import json
+import os
+import re
 import subprocess
-import urllib.request
+import sys
 import urllib.error
+import urllib.request
 
 # === Windows 控制台 UTF-8（避免中文乱码/UnicodeEncodeError）===
 if sys.platform == 'win32':
@@ -480,7 +479,7 @@ def main():
         sys.exit(1)
 
     print('=' * 60)
-    print('[OK] 发布完成! v{}'.format(version))
+    print(f'[OK] 发布完成! v{version}')
     print(f'    Release: https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{version}')
     print(f'    version.json: https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{branch}/version.json')
     print('=' * 60)

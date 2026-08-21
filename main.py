@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 网络安全值守保障日报整合脚本（纯入口，方案一拆分后）
 功能：1. IP归属分析（ipdb.py） 2. 值守日报生成（report.py） 3. GUI（gui.py）
@@ -7,25 +6,47 @@
 """
 
 import os
-import re
-import sys
 import subprocess
+import sys
 import warnings
 from datetime import datetime
 
 # B档：通用工具与自动更新逻辑已拆分至 common.py / updater.py
 # 方案一：IP 归属域 → ipdb.py；日报域 → report.py；GUI → gui.py；本文件仅保留入口与版本
-from common import script_dir, runtime_dir, _log, set_gui_callbacks, _find_file
-from updater import (AutoUpdater, load_update_config, safe_get,
-                     get_requests_verify, update_worker_main)
-from ipdb import (generate_ip_report, is_private_ip, is_valid_public_ip,
-                  local_ip_label, parse_region, _parse_ip_range, is_excluded_ip,
-                  load_external_excluded_ips, set_terminal_ip_table_path,
-                  load_terminal_ip_table, query_all_ips, load_config,
-                  format_online_result, EXCLUDED_IP_NETWORKS, EXCLUDED_IP_LABELS)
-from report import (generate_daily_report, pick_input_and_date, classify,
-                    load_and_classify, load_single_file, analyze, render, load_intel)
+# 以下 re-export 为兼容层（cli_main 使用 + tests 以 main.xxx 访问），# noqa: F401 防 ruff 误删
 from gui import gui_main
+from ipdb import (  # noqa: F401
+    EXCLUDED_IP_LABELS,
+    EXCLUDED_IP_NETWORKS,
+    _parse_ip_range,
+    extract_geos_from_alerts,
+    extract_zones_from_alerts,
+    format_online_result,
+    generate_ip_report,
+    is_excluded_ip,
+    is_private_ip,
+    is_valid_public_ip,
+    load_config,
+    load_external_excluded_ips,
+    load_probes_from_excel,
+    load_terminal_ip_table,
+    local_ip_label,
+    parse_region,
+    query_all_ips,
+    set_terminal_ip_table_path,
+)
+from report import (  # noqa: F401
+    analyze,
+    classify,
+    generate_daily_report,
+    load_and_classify,
+    load_intel,
+    load_single_file,
+    pick_input_and_date,
+    render,
+)
+from updater import update_worker_main
+
 
 # 修复 numpy 2.x 在打包后 DLL 加载问题
 def _setup_dll_paths():

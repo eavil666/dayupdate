@@ -1,7 +1,5 @@
-# -*- coding: utf-8 -*-
 """updater.py 单元测试：版本比较、SSL 降级、配置解析、AutoUpdater 状态机"""
 import sys
-import types
 from types import SimpleNamespace
 
 import pytest

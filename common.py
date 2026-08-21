@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """通用共享模块（B档拆分自 main.py）
 
 职责：
@@ -12,6 +11,7 @@
 
 import os
 import sys
+from datetime import datetime
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 运行时基础目录（打包后优先使用exe所在目录）
@@ -33,11 +33,19 @@ else:
 _gui_log_callback = None
 _gui_progress_callback = None
 
+# ---- 日志级别 ----
+INFO = 'INFO'
+WARN = 'WARN'
+ERROR = 'ERROR'
+
+# 文件日志路径（追加；*.log 已在 .gitignore，不入库）
+_log_file_path = os.path.join(runtime_dir, 'app.log')
+
 
 def set_gui_callbacks(log_cb=None, progress_cb=None):
     """注册 GUI 日志/进度回调（GUI 初始化时调用；传 None 则保留原值）。
 
-    - log_cb(msg)：日志文本回调
+    - log_cb(msg)：日志文本回调（收到原始 msg，GUI 自带时间戳显示）
     - progress_cb(value, maximum)：进度回调（maximum=None 不确定模式，0 表示完成）
     """
     global _gui_log_callback, _gui_progress_callback
@@ -47,12 +55,37 @@ def set_gui_callbacks(log_cb=None, progress_cb=None):
         _gui_progress_callback = progress_cb
 
 
-def _log(msg):
-    """输出日志：GUI 模式发到界面，否则 print"""
+def _append_log_file(msg, level=INFO):
+    """追加写文件日志（带日期时间戳），失败不影响主流程"""
+    try:
+        with open(_log_file_path, 'a', encoding='utf-8') as f:
+            f.write(f'[{datetime.now():%Y-%m-%d %H:%M:%S}] [{level}] {msg}\n')
+    except Exception:
+        pass
+
+
+def _log(msg, level=INFO):
+    """统一日志：时间戳 + 级别 + 文件（app.log）+ GUI/控制台。
+
+    - GUI 模式：回调收到【原始 msg】（GUI 自带时间戳，避免双时间戳）
+    - CLI 模式：print 带时间戳与级别（flush 保证 CI/管道及时输出）
+    - 文件：追加到 runtime_dir/app.log（含日期，便于跨天排障）
+    """
+    _append_log_file(msg, level)
     if _gui_log_callback:
         _gui_log_callback(msg)
     else:
-        print(msg)
+        print(f'[{datetime.now():%H:%M:%S}] [{level}] {msg}', flush=True)
+
+
+def _log_warn(msg):
+    """警告级别日志"""
+    _log(msg, WARN)
+
+
+def _log_err(msg):
+    """错误级别日志"""
+    _log(msg, ERROR)
 
 
 def _set_progress(value, maximum=None):

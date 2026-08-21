@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 IP 归属业务域（方案一拆分）
 功能：离线/在线 IP 归属查询、内外网/排除 IP 判定、终端 IP 表、IP归属分析 xlsx 生成。
@@ -8,17 +7,16 @@ IP 归属业务域（方案一拆分）
 load_terminal_ip_table），放此处可保证 report→ipdb 单向依赖、无循环 import。
 """
 
+import configparser
+import ipaddress
 import os
-import re
 import sys
 import time
-import ipaddress
-import configparser
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from common import (script_dir, runtime_dir, _log, _set_progress, _find_file)
-from updater import safe_get, get_requests_verify
+from common import _find_file, _log, _set_progress, runtime_dir, script_dir
+from updater import get_requests_verify, safe_get
 
 
 def _load_excluded_ip_networks(config_path: str = None) -> list:
@@ -714,7 +712,7 @@ def generate_ip_report(files, date, local_geos=None):
 
     # 懒加载openpyxl模块
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, Border, Side, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
     wb = Workbook()
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),

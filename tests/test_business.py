@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """main.py 业务纯逻辑测试（不触网、不读写真实业务文件）"""
 import ipaddress
 
@@ -127,6 +126,7 @@ def test_load_config_missing_sections(tmp_path, monkeypatch):
 def test_extract_zones_geos_from_alerts(tmp_path):
     """从告警文件源区域/源地理信息列提取（排除默认区域噪声）"""
     import pandas as pd
+
     import ipdb
     alert = tmp_path / 'alerts_test.xlsx'
     pd.DataFrame({
@@ -141,69 +141,9 @@ def test_extract_zones_geos_from_alerts(tmp_path):
 
 def test_load_probes_from_excel(tmp_path, monkeypatch):
     """业务ip.xlsx 带"探针"sheet 时读取探针；无 sheet 返回空"""
-    import ipdb
     from openpyxl import Workbook
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Sheet1'
-    ws.append(['ip', '说明'])
-    ws.append(['1.2.3.4', '测试'])
-    ws2 = wb.create_sheet('探针')
-    ws2.append(['名称', 'IP地址'])
-    ws2.append(['探针A', '172.16.1.1'])
-    ws2.append(['探针B', '172.16.1.2'])
-    p = tmp_path / 'biz.xlsx'
-    wb.save(p)
-    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(p))
-    rows = ipdb.load_probes_from_excel()
-    assert rows == [('探针A', '172.16.1.1'), ('探针B', '172.16.1.2')]
-    # 无探针 sheet
-    wb3 = Workbook()
-    wb3.active.append(['ip', '说明'])
-    p3 = tmp_path / 'biz3.xlsx'
-    wb3.save(p3)
-    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(p3))
-    assert ipdb.load_probes_from_excel() == []
 
-
-def test_load_config_enhance_from_alerts(tmp_path, monkeypatch):
-    """load_config(files)：告警提取的 zones/geos 合并进 conf（config 留空时生效）"""
     import ipdb
-    # 隔离文件依赖
-    monkeypatch.setattr(ipdb, '_auto_load_excluded_ips', lambda: None)
-    monkeypatch.setattr(ipdb, 'load_terminal_ip_table', lambda: {})
-    monkeypatch.setattr(ipdb, 'load_probes_from_excel', lambda: [])
-    monkeypatch.setattr(ipdb, '_find_file', lambda name: str(tmp_path / 'none.ini'))
-    monkeypatch.setattr(ipdb, 'extract_zones_from_alerts', lambda files: {'集团四楼', '一卡通'})
-    monkeypatch.setattr(ipdb, 'extract_geos_from_alerts', lambda files: {'长春'})
-    conf = ipdb.load_config(files=[tmp_path / 'a.xlsx'])
-    assert '集团四楼' in conf['zones'] and '一卡通' in conf['zones']
-    assert '长春' in conf['geos']
-    assert conf['retention'] == 180       # 其余默认值不受影响
-    assert conf['probes'] == []           # 探针 sheet 为空
-
-
-# ---------- 配置解放：从 Excel/告警文件自动获取 ----------
-
-def test_extract_zones_geos_from_alerts(tmp_path):
-    """从告警文件源区域/源地理信息列提取（排除默认区域噪声）"""
-    import pandas as pd
-    import ipdb
-    alert = tmp_path / 'alerts_test.xlsx'
-    pd.DataFrame({
-        '源区域': ['集团四楼', '默认区域', '后楼二楼西', '集团四楼'],
-        '源地理信息': ['吉林-长春', '吉林-长春', '美国', '中国'],
-    }).to_excel(alert, index=False)
-    zones = ipdb.extract_zones_from_alerts([alert])
-    assert zones == {'集团四楼', '后楼二楼西'}   # 默认区域被排除
-    geos = ipdb.extract_geos_from_alerts([alert])
-    assert geos == {'长春'}                       # 吉林-长春 → 长春
-
-
-def test_load_probes_from_excel(tmp_path, monkeypatch):
-    """业务ip.xlsx 带"探针"sheet 时读取探针；无 sheet 返回空"""
-    import ipdb
-    from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active
     ws.title = 'Sheet1'

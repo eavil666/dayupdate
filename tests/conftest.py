@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """pytest 公共配置：
 - 打桩 tkinter（main.py 顶层 import，测试环境无显示）
 - 关闭自动安装依赖（NO_AUTO_INSTALL=1）

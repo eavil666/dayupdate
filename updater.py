@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """自动更新模块（B档拆分自 main.py）
 
 职责：
@@ -12,16 +11,15 @@
 依赖：仅 stdlib + requests + common（日志/路径）。**不依赖任何业务模块**。
 """
 
-import os
-import sys
-import re
-import time
-import subprocess
 import configparser
+import os
+import re
+import subprocess
+import sys
+import time
 from datetime import datetime
 
-from common import _log, runtime_dir
-
+from common import runtime_dir
 
 # ================ 版本 & 自动更新 ================
 
@@ -53,14 +51,18 @@ CDN_MIRROR_PREFIXES = [
 ]
 
 # version.json 兜底源（GitHub API 失败时使用）
-# 注意：不要用 jsDelivr（cdn.jsdelivr.net）——它对 version.json 长缓存且忽略 ?t= 参数，
+# 分支开发模式：兜底源指向当前开发分支（refactor/b-module-split），
+# 保证分支发布的 version.json 能被客户端兜底读到。
+# 注意：raw.githubusercontent.com 对含斜杠的分支名须用【非编码】路径（斜杠直接放），
+# URL 编码 %2F 会 404。若日后合并回 main，把下面三处分支名改回 main 即可。
+# 不要用 jsDelivr（cdn.jsdelivr.net）——它对 version.json 长缓存且忽略 ?t= 参数，
 # 会返回远古旧版本（实测缓存到 1.0.0），导致"一版一版升"或检测错乱
 UPDATE_VERSION_URLS = [
-    # raw 优先：缓存仅 5 分钟
-    "https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
+    # raw 优先：缓存仅 5 分钟（分支名斜杠不编码）
+    "https://raw.githubusercontent.com/eavil666/dayupdate/refactor/b-module-split/version.json",
     # ghproxy/ghfast 镜像 raw：国内可达，无长缓存问题
-    "https://ghproxy.net/https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
-    "https://ghfast.top/https://raw.githubusercontent.com/eavil666/dayupdate/main/version.json",
+    "https://ghproxy.net/https://raw.githubusercontent.com/eavil666/dayupdate/refactor/b-module-split/version.json",
+    "https://ghfast.top/https://raw.githubusercontent.com/eavil666/dayupdate/refactor/b-module-split/version.json",
     # "http://intranet-server/apps/report/version.json",
     # r"\\file-server\share\report\version.json",
 ]
@@ -95,7 +97,9 @@ def get_requests_verify():
     try:
         if getattr(sys, 'frozen', False):
             try:
-                import certifi, ssl
+                import ssl
+
+                import certifi
                 ca_path = certifi.where()
                 # PyInstaller certifi hook 有时把 cacert.pem 放到多个目录，
                 # certifi.where() 返回的路径虽 os.path.exists 为 True，
@@ -104,7 +108,7 @@ def get_requests_verify():
                 # 所以除了文件存在，还要用 ssl 模块实际验证一下该 PEM 能被加载。
                 if ca_path and os.path.isfile(ca_path) and os.path.getsize(ca_path) > 0:
                     try:
-                        ctx = ssl.create_default_context(cafile=ca_path)
+                        ssl.create_default_context(cafile=ca_path)  # 仅验证 PEM 可加载（无异常即合法）
                         # 没异常说明 cafile 合法
                         # 但仍需要避免重复覆盖 REQUESTS_CA_BUNDLE（运行时 hook 已经设置过）
                         if 'REQUESTS_CA_BUNDLE' not in os.environ:
@@ -227,7 +231,9 @@ class AutoUpdater:
         （requests 流式下载 + raise_for_status 已能捕获传输错误，足够可靠）。
         """
         try:
-            import requests
+            import importlib.util
+            if importlib.util.find_spec('requests') is None:
+                raise ImportError
         except ImportError:
             self.log_cb("[版本] 缺少 requests 库，跳过 GitHub API 检查")
             return None
@@ -280,7 +286,7 @@ class AutoUpdater:
                 else:
                     # 共享目录 / 本地文件
                     import json
-                    with open(url, 'r', encoding='utf-8') as f:
+                    with open(url, encoding='utf-8') as f:
                         data = json.load(f)
                 if isinstance(data, dict) and 'version' in data:
                     self.log_cb(f"[版本] 从 {url} 获取版本信息成功 (version={data.get('version')})")
@@ -439,7 +445,10 @@ class AutoUpdater:
         # 结论：用自身 --update-worker 模式，任何版本都能自更新，无外部依赖。
         # worker 模式入口在 main() 顶部，检测到 --update-worker=<jsonPath> 即
         # 跳到 update_worker_main()，不加载任何 GUI/Tkinter。
-        import json, tempfile, hashlib, shutil as _shu
+        import hashlib
+        import json
+        import shutil as _shu
+        import tempfile
 
         tag = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
         json_params_path = os.path.join(tempfile.gettempdir(), f"update_{tag}_params.json")
@@ -554,11 +563,12 @@ def update_worker_main(json_path):
     - 避免 cmd/.bat 的中文路径 GBK/UTF-8 乱码
     - 100% 走 Python 文件 API（Copy-Item 级），中文路径零问题
     """
-    import json, traceback, hashlib
+    import hashlib
+    import json
 
     # ===== 解析参数 =====
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, encoding='utf-8') as f:
             params = json.load(f)
         parent_pid = int(params['parentPid'])
         old_exe    = str(params['oldExe'])
@@ -566,7 +576,8 @@ def update_worker_main(json_path):
         bak_exe    = str(params['bakExe'])
         work_dir   = str(params['workDir'])
         cleanups   = [str(params['jsonPath'])]
-        if 'ps1Path' in params and params['ps1Path']: cleanups.append(str(params['ps1Path']))
+        if 'ps1Path' in params and params['ps1Path']:
+            cleanups.append(str(params['ps1Path']))
         worker_exe = str(params.get('workerExe', ''))
     except Exception as e:
         # 尽量写日志（优先临时目录，避免 exe 目录无写权限）
@@ -583,7 +594,6 @@ def update_worker_main(json_path):
     import tempfile as _tf
     _tmp_log = os.path.join(_tf.gettempdir(), 'update_last.log')
     _exe_log = os.path.join(work_dir, 'update_last.log')
-    log_file = _tmp_log
 
     def wlog(msg):
         ts = datetime.now().strftime('%H:%M:%S')
@@ -613,7 +623,6 @@ def update_worker_main(json_path):
             if not h:
                 return False
             # WaitForSingleObject 0 毫秒：若已退出立刻返回 WAIT_OBJECT_0
-            WAIT_OBJECT_0 = 0
             WAIT_TIMEOUT = 0x00000102
             r = k32.WaitForSingleObject(h, 0)
             k32.CloseHandle(h)

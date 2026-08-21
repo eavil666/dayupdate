@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 值守日报业务域（方案一拆分）
 功能：告警文件加载/分类、威胁等级统计、docx 值守日报渲染（八大板块）、情报/跟进/总结。
@@ -7,14 +6,14 @@
 注意：classify 等 IP 判定逻辑在 ipdb（IP 判定为 IP 域职责）；本模块只做业务统计与渲染。
 """
 
+import ipaddress
 import os
 import re
-import ipaddress
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from common import runtime_dir, _log
-from ipdb import is_private_ip, is_excluded_ip, load_config
+from common import _log, runtime_dir
+from ipdb import is_excluded_ip, is_private_ip, load_config
 
 
 def classify(ip, zone, geo, conf):
@@ -188,8 +187,8 @@ def _add_table(doc, headers, widths, rows):
     return tbl
 
 def _hdr(table, headers):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.table import WD_ALIGN_VERTICAL
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     for i, h in enumerate(headers):
         c = table.rows[0].cells[i]
         c.text = ''
@@ -199,11 +198,11 @@ def _hdr(table, headers):
         c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
 def _set_cell(cell, text, bold=False, size=9, padding=None):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.table import WD_ALIGN_VERTICAL
-    from docx.shared import Pt
-    from docx.oxml.ns import qn
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
     cell.text = ''
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -228,9 +227,8 @@ def _set_cell(cell, text, bold=False, size=9, padding=None):
             tcMar.append(elem)
 
 def _fit_table(table, widths=None):
-    from docx.shared import Pt
-    from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
 
     if widths is None:
         widths = []
@@ -260,10 +258,10 @@ def _fit_table(table, widths=None):
 
 def render(conf, df, stats, health_rows, intel_list, date, out_path, work_summary=None, follow_items=None, intel_items=None):
     import docx
-    from docx.shared import Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
 
     doc = docx.Document()
     # 统一设置样式字体

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 GUI 界面层（方案一拆分）
 功能：tkinter 主界面（文件选择/业务IP导入/终端IP表导入/日期/总结/跟进/情报/日志/进度/更新检查）。
@@ -10,20 +9,30 @@ GUI 界面层（方案一拆分）
 import os
 import re
 import threading
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from tkinter import (
-    Tk, Frame, Label, Button, Listbox, Entry, Text,
-    Scrollbar, filedialog, messagebox, StringVar, END, NONE,
-    DISABLED, NORMAL
+    DISABLED,
+    END,
+    NONE,
+    NORMAL,
+    Button,
+    Entry,
+    Frame,
+    Label,
+    Listbox,
+    Scrollbar,
+    StringVar,
+    Text,
+    Tk,
+    filedialog,
+    messagebox,
 )
 
 from common import runtime_dir, set_gui_callbacks
-from ipdb import (load_external_excluded_ips, set_terminal_ip_table_path,
-                  load_terminal_ip_table, generate_ip_report)
-from report import pick_input_and_date, generate_daily_report
+from ipdb import generate_ip_report, load_external_excluded_ips, load_terminal_ip_table, set_terminal_ip_table_path
+from report import generate_daily_report, pick_input_and_date
 from updater import AutoUpdater, load_update_config
-
 
 # GUI 文本框示例占位文本
 EXAMPLE_WORK_SUMMARY = '示例：\n1. 完成防火墙规则优化\n2. 处置高危漏洞告警'
@@ -495,5 +504,5 @@ class DailyReportGUI:
 def gui_main(app_version='1.5.0'):
     """GUI模式入口"""
     root = Tk()
-    app = DailyReportGUI(root, app_version=app_version)
+    DailyReportGUI(root, app_version=app_version)  # 实例持有 root 引用，生命周期随 mainloop
     root.mainloop()

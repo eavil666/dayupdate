@@ -17,3 +17,18 @@ dependencies = [
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# F=pyflakes(未用导入/变量) E/W=pycodestyle I=import排序 UP=pyupgrade 现代化
+select = ["F", "E", "W", "I", "UP"]
+ignore = [
+    "E501",   # 行长（120 内已限，个别长行可接受）
+    "BLE001", # 盲捕获 Exception 是本项目健壮性模式（网络/文件操作）
+    "S110",   # try-except-pass（失败静默有意为之）
+    "S112",   # try-except-continue（同上）
+    "DTZ005", # datetime.now 无时区（桌面工具不涉及时区）
+]

@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 打包脚本 - 将项目打包成exe可执行文件（单文件模式，带体积优化）
 使用方法: python build_exe.py
 """
 
-import os
-import sys
-import subprocess
-import shutil
-import re
 import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
 
 # === Windows 控制台 UTF-8（避免中文乱码/UnicodeEncodeError）===
 # CI runner 上 stdout 默认 cp1252，无法编码中文；与 release.py 保持一致。
@@ -67,9 +66,9 @@ def set_app_version(version):
     """将 main.py 中的 APP_VERSION 常量修改为指定版本号"""
     main_file = os.path.join(script_dir, 'main.py')
     if not os.path.exists(main_file):
-        print(f'[-] 未找到 main.py，无法写入版本号')
+        print('[-] 未找到 main.py，无法写入版本号')
         return False
-    with open(main_file, 'r', encoding='utf-8') as f:
+    with open(main_file, encoding='utf-8') as f:
         content = f.read()
     pattern = r'(APP_VERSION\s*=\s*["\'])([^"\']+)(["\'])'
     if not re.search(pattern, content):
@@ -87,7 +86,9 @@ def set_app_version(version):
 def install_pyinstaller():
     """安装PyInstaller"""
     try:
-        import PyInstaller
+        import importlib.util
+        if importlib.util.find_spec('PyInstaller') is None:
+            raise ImportError
         print('[+] PyInstaller 已安装')
         return True
     except ImportError:

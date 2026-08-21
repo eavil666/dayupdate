@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """common.py 单元测试：路径、日志/进度回调、文件查找"""
 import os
 
