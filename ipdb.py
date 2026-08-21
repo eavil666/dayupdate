@@ -74,9 +74,18 @@ def is_excluded_ip(ip_str):
                 return True
     return False
 
-def load_external_excluded_ips(excel_path):
-    """从外部Excel文件加载排除业务IP，格式：ip, 说明"""
+def load_external_excluded_ips(excel_path=None):
+    """从外部Excel文件加载排除业务IP，格式：ip, 说明。
+
+    excel_path 缺省时自动查找脚本目录下的 业务ip.xlsx（解放 config.ini 的
+    excluded_ips 硬编码）。支持单 IP / 范围 / 简写（1.2.3.4-10）。
+    """
     global EXCLUDED_IP_NETWORKS, EXCLUDED_IP_LABELS
+    if excel_path is None:
+        excel_path = _find_file('业务ip.xlsx')
+    if not excel_path or not os.path.exists(excel_path):
+        _log('[!] 未找到业务ip.xlsx（排除IP清单），跳过自动加载')
+        return 0
     import pandas as pd
     try:
         df = pd.read_excel(excel_path)
@@ -116,11 +125,112 @@ def load_external_excluded_ips(excel_path):
             for ip in ips:
                 EXCLUDED_IP_LABELS[ip] = label_str
             count += 1
-        _log(f'[+] 从外部文件加载业务IP: {count} 条')
+        _log(f'[+] 从业务IP文件加载排除IP: {count} 条 ({os.path.basename(excel_path)})')
         return count
     except Exception as e:
         _log(f'[!] 加载外部业务IP文件失败: {e}')
         return 0
+
+
+# 自动加载业务IP 的幂等标志（避免多次调用重复 append）
+_AUTO_EXCLUDED_LOADED = False
+
+def _auto_load_excluded_ips():
+    """自动从 业务ip.xlsx 加载排除IP（仅首次生效）"""
+    global _AUTO_EXCLUDED_LOADED
+    if _AUTO_EXCLUDED_LOADED:
+        return
+    _AUTO_EXCLUDED_LOADED = True
+    load_external_excluded_ips()
+
+
+def extract_zones_from_alerts(files):
+    """从安全告警文件的"源区域"列提取内网区域集合（自动发现，解放 config internal_zones）。
+
+    排除"默认区域"等无业务含义的噪声值；文件列名自动 strip 容错。
+    """
+    import pandas as pd
+    zones = set()
+    for f in files:
+        path = str(f)
+        try:
+            df = pd.read_excel(path, usecols=['源区域'])
+        except Exception:
+            try:
+                df = pd.read_excel(path)
+            except Exception:
+                continue
+            df.columns = df.columns.str.strip()
+            if '源区域' not in df.columns:
+                continue
+            df = df[['源区域']]
+        for v in df['源区域'].dropna().astype(str):
+            v = v.strip()
+            if v and v != '默认区域':
+                zones.add(v)
+    if zones:
+        _log(f'[+] 从告警文件提取内网区域 {len(zones)} 个: {", ".join(sorted(zones)[:8])}{"..." if len(zones) > 8 else ""}')
+    return zones
+
+
+def extract_geos_from_alerts(files):
+    """从安全告警文件的"源地理信息"列提取本地归属地关键词（吉林-长春 → 长春）。
+
+    命中"吉林/长春/本地"相关值才提取，避免把北京/国外等误判为本地。
+    """
+    import pandas as pd
+    geos = set()
+    hints = ('吉林', '长春', '本地')
+    for f in files:
+        path = str(f)
+        try:
+            df = pd.read_excel(path, usecols=['源地理信息'])
+        except Exception:
+            try:
+                df = pd.read_excel(path)
+            except Exception:
+                continue
+            df.columns = df.columns.str.strip()
+            if '源地理信息' not in df.columns:
+                continue
+            df = df[['源地理信息']]
+        for v in df['源地理信息'].dropna().astype(str):
+            if any(h in v for h in hints):
+                geos.add('长春')
+    if geos:
+        _log(f'[+] 从告警文件提取本地归属地关键词: {", ".join(sorted(geos))}')
+    return geos
+
+
+def load_probes_from_excel():
+    """从 业务ip.xlsx 的"探针"sheet 读取探针（列：名称 | IP地址）。
+
+    无该 sheet 或无有效行时返回 []（回退 config.ini [health] probes）。
+    """
+    path = _find_file('业务ip.xlsx')
+    if not path or not os.path.exists(path):
+        return []
+    try:
+        import pandas as pd
+        xl = pd.ExcelFile(path)
+        if '探针' not in xl.sheet_names:
+            return []
+        df = pd.read_excel(path, sheet_name='探针')
+        df.columns = df.columns.str.strip()
+        name_col = '名称' if '名称' in df.columns else df.columns[0]
+        ip_col = next((c for c in ('IP地址', 'IP', 'ip') if c in df.columns), df.columns[1] if len(df.columns) > 1 else name_col)
+        rows = []
+        for _, r in df.iterrows():
+            name = str(r[name_col]).strip()
+            ip = str(r[ip_col]).strip()
+            if name and ip and ip.lower() != 'nan':
+                rows.append((name, ip))
+        if rows:
+            _log(f'[+] 从业务ip.xlsx[探针]加载探针: {len(rows)} 个')
+        return rows
+    except Exception as e:
+        _log(f'[!] 读取探针sheet失败: {e}')
+        return []
 
 def is_private_ip(ip_str):
     try:
@@ -483,7 +593,18 @@ def extract_source_ips(file_path):
         internal_ips = internal_df['源 IP'].drop_duplicates().tolist()
     return external_ips, internal_ips, excluded_ips
 
-def load_config():
+def load_config(files=None):
+    """读取配置：config.ini 为兜底 + 从文件自动获取（解放 config 硬编码）。
+
+    files：本次生成的安全告警文件列表（Path）。提供时：
+      - internal_zones ← 告警"源区域"列自动提取（config 值合并兜底）
+      - local_geos    ← 告警"源地理信息"列提取"长春"等（config 值合并兜底）
+    excluded_ips ← 业务ip.xlsx 自动加载（模块级 EXCLUDED_IP_NETWORKS）。
+    probes       ← 业务ip.xlsx[探针]sheet 优先，否则 config [health] probes。
+    """
+    # 排除IP：业务ip.xlsx 自动加载（幂等，config 的 excluded_ips 已不再需要）
+    _auto_load_excluded_ips()
+
     cfg = configparser.ConfigParser()
     # 优先从exe目录读取，其次从临时解压目录；缺失时全部回退默认值（不崩溃）
     config_path = _find_file('config.ini')
@@ -535,6 +656,19 @@ def load_config():
     conf['top'] = _getint('report', 'top_events', 5)
     conf['crit_levels'] = {x.strip() for x in _get('report', 'critical_levels', '严重,高危').split(',') if x.strip()}
     conf['ban_levels'] = {x.strip() for x in _get('report', 'ban_levels', '高危,严重').split(',') if x.strip()}
+
+    # ---- 从文件自动增强（config 留空时生效，有值时合并）----
+    if files:
+        alert_zones = extract_zones_from_alerts(files)
+        if alert_zones:
+            conf['zones'] |= alert_zones
+        alert_geos = extract_geos_from_alerts(files)
+        if alert_geos:
+            conf['geos'] |= alert_geos
+    # probes：业务ip.xlsx[探针]sheet 优先（config [health] probes 作为兜底）
+    excel_probes = load_probes_from_excel()
+    if excel_probes:
+        conf['probes'] = excel_probes
     return conf
 
 def generate_ip_report(files, date):
@@ -558,9 +692,9 @@ def generate_ip_report(files, date):
     # 查询排除IP的归属地
     excluded_location_map = query_all_ips(excluded_ip_list) if excluded_ip_list else {}
     load_terminal_ip_table()
-    # 加载 local_geos 配置用于标记本地IP
+    # 加载 local_geos 配置用于标记本地IP（传入 files 自动从告警提取区域/归属地）
     try:
-        conf = load_config()
+        conf = load_config(files)
         local_geos = conf.get('geos', set())
     except Exception as e:
         _log(f'[!] 加载配置失败，local_geos 回退为空: {e}')

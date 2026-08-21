@@ -488,7 +488,7 @@ def pick_input_and_date(pattern):
     return target_files, date
 
 def generate_daily_report(files, date, work_summary=None, follow_items=None, intel_items=None):
-    conf = load_config()
+    conf = load_config(files)  # files：自动从告警提取区域/归属地，从业务ip.xlsx 加载排除IP与探针
     df = load_and_classify(files, conf)
     stats = analyze(df)
     _log(f'[+] 总告警 {stats["total"]} | 内网 {stats["int_count"]} | 外网 {stats["ext_count"]} | 封禁 {stats["ban_count"]}')
