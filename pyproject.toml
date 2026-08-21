@@ -16,7 +16,18 @@ dependencies = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-q"
+# --cov：pytest 默认带覆盖率（配合下方 fail_under=50 门槛）
+addopts = "-q --cov"
+
+[tool.coverage.run]
+# 覆盖率测量范围：5 个核心模块（main 为入口，体积小）
+source = ["main", "common", "updater", "ipdb", "report"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+# 覆盖率门槛：低于 50% 时 pytest --cov 失败（防改动大幅降覆盖）
+fail_under = 50
+show_missing = true
 
 [tool.ruff]
 line-length = 120

@@ -180,3 +180,26 @@ def test_autoupdater_custom_source_fail():
 def test_autoupdater_default_not_custom():
     au = updater.AutoUpdater(current_version="1.0.0")
     assert au.custom_source is False
+
+
+# ---------- check_update 全链路（mock 网络） ----------
+
+
+def test_check_update_api_first_then_json_fallback(monkeypatch):
+    """默认链路：GitHub API 失败 → version.json 兜底"""
+    au = updater.AutoUpdater(current_version="1.6.1", log_cb=lambda m: None)
+    monkeypatch.setattr(au, "_fetch_latest_release_api", lambda: None)
+    monkeypatch.setattr(au, "_fetch_version_json", lambda: {"version": "9.9.9", "exe_urls": ["x"]})
+    info = au.check_update()
+    assert info is not None and info["version"] == "9.9.9"
+    assert au.last_status == "发现新版本"
+
+
+def test_check_update_all_sources_fail(monkeypatch):
+    """所有源失败 → 检查失败并记录原因"""
+    au = updater.AutoUpdater(current_version="1.6.1", log_cb=lambda m: None)
+    monkeypatch.setattr(au, "_fetch_latest_release_api", lambda: None)
+    monkeypatch.setattr(au, "_fetch_version_json", lambda: None)
+    assert au.check_update() is None
+    assert au.last_status == "检查失败"
+    assert au.last_check_error and "所有更新源" in au.last_check_error

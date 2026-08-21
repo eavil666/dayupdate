@@ -210,3 +210,71 @@ def test_load_config_custom_geos(tmp_path, monkeypatch):
     # 空/空白输入 → 无新增
     conf2 = ipdb.load_config(files=[], local_geos="  ")
     assert conf2["geos"] == set()
+
+
+def test_extract_source_ips(tmp_path, monkeypatch):
+    """extract_source_ips：从告警 Excel 提取外网/内网/排除 IP（去重）"""
+    import pandas as pd
+
+    import ipdb
+
+    # 排除 IP 隔离：清空模块级（避免真实 config/业务ip 干扰）
+    monkeypatch.setattr(ipdb, "EXCLUDED_IP_NETWORKS", [])
+    alert = tmp_path / "alerts_src.xlsx"
+    pd.DataFrame(
+        {
+            "源 IP": ["1.2.3.4", "1.2.3.4", "10.0.0.1", "8.8.8.8", "bad-ip"],
+            "目标 IP": ["10.0.0.2", "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5"],
+        }
+    ).to_excel(alert, index=False)
+    external, internal, excluded = ipdb.extract_source_ips(str(alert))
+    assert "1.2.3.4" in external and "8.8.8.8" in external
+    assert external.count("1.2.3.4") == 1  # 去重
+    assert "10.0.0.1" in internal
+    assert excluded == []  # 无排除 IP
+
+
+def test_extract_source_ips_missing_cols(tmp_path):
+    """缺源/目的 IP 列 → 返回空"""
+    import pandas as pd
+
+    import ipdb
+
+    alert = tmp_path / "bad_cols.xlsx"
+    pd.DataFrame({"名称": ["x"], "值": [1]}).to_excel(alert, index=False)
+    assert ipdb.extract_source_ips(str(alert)) == ([], [], [])
+
+
+def test_query_all_ips_offline(tmp_path, monkeypatch):
+    """query_all_ips：离线库路径（mock searcher）"""
+    import ipdb
+
+    monkeypatch.setattr(ipdb, "get_offline_searcher", lambda: object())
+    monkeypatch.setattr(
+        ipdb,
+        "query_offline",
+        lambda s, ips: {
+            "8.8.8.8": ("美国 加利福尼亚", "美国", "加利福尼亚"),
+            "1.2.3.4": ("中国 吉林省 长春市", "吉林省", "长春市"),
+        },
+    )
+    results = ipdb.query_all_ips(["8.8.8.8", "1.2.3.4", "10.0.0.1"])
+    assert results["8.8.8.8"][0] == "美国 加利福尼亚"
+    assert results["10.0.0.1"][0] == "内网/保留地址"  # 私网直接标记
+
+
+def test_query_all_ips_online(tmp_path, monkeypatch):
+    """query_all_ips：在线 API 路径（mock batch）"""
+    import ipdb
+
+    monkeypatch.setattr(ipdb, "get_offline_searcher", lambda: None)
+    monkeypatch.setattr(
+        ipdb,
+        "query_online_batch",
+        lambda ips: {
+            "8.8.8.8": "中国 吉林省 长春市",
+        },
+    )
+    results = ipdb.query_all_ips(["8.8.8.8", "10.0.0.1"])
+    assert "中国" in results["8.8.8.8"][0]
+    assert results["10.0.0.1"][0] == "内网/保留地址"

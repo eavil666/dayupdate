@@ -115,7 +115,8 @@ def analyze(df):
         return {lv: int((sub["威胁等级"] == lv).sum()) for lv in LEVELS}
 
     external_to_internal = external.copy()
-    if "目的IP" in external.columns:
+    # 空 external 时跳过过滤：pandas 空 df 用空 bool 过滤会丢失全部列（KeyError）
+    if "目的IP" in external.columns and len(external) > 0:
         external_to_internal = external[external["目的IP"].apply(is_private_ip)]
     external_to_internal = external_to_internal[~external_to_internal["源IP"].apply(is_excluded_ip)]
     ban_count = int(external_to_internal["源IP"].nunique()) if len(external_to_internal) > 0 else 0
