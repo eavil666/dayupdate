@@ -13,16 +13,17 @@ import sys
 
 # === Windows 控制台 UTF-8（避免中文乱码/UnicodeEncodeError）===
 # CI runner 上 stdout 默认 cp1252，无法编码中文；与 release.py 保持一致。
-if sys.platform == 'win32':
+if sys.platform == "win32":
     try:
         import ctypes
+
         ctypes.windll.kernel32.SetConsoleOutputCP(65001)
         ctypes.windll.kernel32.SetConsoleCP(65001)
     except Exception:
         pass
 for _stream in (sys.stdout, sys.stderr):
     try:
-        _stream.reconfigure(encoding='utf-8', errors='replace')
+        _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
@@ -33,12 +34,15 @@ def get_git_version():
     """从 Git 标签获取版本号（去除 v 前缀，失败返回 None）"""
     try:
         # 最近一个 tag（去掉 v 前缀）
-        tag = subprocess.check_output(
-            ['git', 'describe', '--tags', '--abbrev=0'],
-            cwd=script_dir, stderr=subprocess.DEVNULL
-        ).decode('utf-8').strip()
-        version = tag.lstrip('vV').strip()
-        if version and re.match(r'^\d+(\.\d+)*$', version):
+        tag = (
+            subprocess.check_output(
+                ["git", "describe", "--tags", "--abbrev=0"], cwd=script_dir, stderr=subprocess.DEVNULL
+            )
+            .decode("utf-8")
+            .strip()
+        )
+        version = tag.lstrip("vV").strip()
+        if version and re.match(r"^\d+(\.\d+)*$", version):
             return version
     except Exception:
         pass
@@ -52,10 +56,10 @@ def get_pyproject_version():
     except ImportError:
         import tomli as tomllib  # py3.10 兜底（若已安装）
     try:
-        with open(os.path.join(script_dir, 'pyproject.toml'), 'rb') as f:
+        with open(os.path.join(script_dir, "pyproject.toml"), "rb") as f:
             data = tomllib.load(f)
-        version = str(data['project']['version']).strip()
-        if version and re.match(r'^\d+(\.\d+)*$', version):
+        version = str(data["project"]["version"]).strip()
+        if version and re.match(r"^\d+(\.\d+)*$", version):
             return version
     except Exception:
         pass
@@ -64,20 +68,20 @@ def get_pyproject_version():
 
 def set_app_version(version):
     """将 main.py 中的 APP_VERSION 常量修改为指定版本号"""
-    main_file = os.path.join(script_dir, 'main.py')
+    main_file = os.path.join(script_dir, "main.py")
     if not os.path.exists(main_file):
-        print('[-] 未找到 main.py，无法写入版本号')
+        print("[-] 未找到 main.py，无法写入版本号")
         return False
-    with open(main_file, encoding='utf-8') as f:
+    with open(main_file, encoding="utf-8") as f:
         content = f.read()
     pattern = r'(APP_VERSION\s*=\s*["\'])([^"\']+)(["\'])'
     if not re.search(pattern, content):
-        print('[-] main.py 中未找到 APP_VERSION 常量')
+        print("[-] main.py 中未找到 APP_VERSION 常量")
         return False
-    new_content, n = re.subn(pattern, rf'\g<1>{version}\g<3>', content, count=1)
+    new_content, n = re.subn(pattern, rf"\g<1>{version}\g<3>", content, count=1)
     if n == 0:
         return False
-    with open(main_file, 'w', encoding='utf-8') as f:
+    with open(main_file, "w", encoding="utf-8") as f:
         f.write(new_content)
     print(f'[+] 版本号已写入 main.py: APP_VERSION = "{version}"')
     return True
@@ -87,20 +91,22 @@ def install_pyinstaller():
     """安装PyInstaller"""
     try:
         import importlib.util
-        if importlib.util.find_spec('PyInstaller') is None:
+
+        if importlib.util.find_spec("PyInstaller") is None:
             raise ImportError
-        print('[+] PyInstaller 已安装')
+        print("[+] PyInstaller 已安装")
         return True
     except ImportError:
-        print('[!] 正在安装 PyInstaller...')
-        subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pyinstaller',
-                              '-i', 'https://pypi.tuna.tsinghua.edu.cn/simple'])
+        print("[!] 正在安装 PyInstaller...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "pyinstaller", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"]
+        )
         return True
 
 
 def create_runtime_hook():
     """创建运行时 hook 文件，用于设置 DLL 路径和 certifi CA 证书路径"""
-    runtime_hook_content = '''import os
+    runtime_hook_content = """import os
 import sys
 
 # Set numpy/pandas DLL paths in frozen mode
@@ -126,22 +132,22 @@ if getattr(sys, 'frozen', False):
             _certifi.where = lambda _p=_cacert: _p
         except Exception:
             pass
-'''
-    runtime_hook_file = os.path.join(script_dir, '_runtime_hook.py')
-    with open(runtime_hook_file, 'w', encoding='utf-8') as f:
+"""
+    runtime_hook_file = os.path.join(script_dir, "_runtime_hook.py")
+    with open(runtime_hook_file, "w", encoding="utf-8") as f:
         f.write(runtime_hook_content)
     return runtime_hook_file
 
 
 def build_exe():
     """执行打包（单文件模式，带体积优化）"""
-    dist_dir = os.path.join(script_dir, 'dist')
-    build_dir = os.path.join(script_dir, 'build')
+    dist_dir = os.path.join(script_dir, "dist")
+    build_dir = os.path.join(script_dir, "build")
 
     # 清理旧产物
     if os.path.exists(dist_dir):
         for f in os.listdir(dist_dir):
-            if f.endswith('.exe'):
+            if f.endswith(".exe"):
                 try:
                     os.remove(os.path.join(dist_dir, f))
                 except PermissionError:
@@ -154,43 +160,44 @@ def build_exe():
 
     # 创建运行时 hook
     runtime_hook_file = create_runtime_hook()
-    print(f'[+] 运行时 hook: {runtime_hook_file}')
+    print(f"[+] 运行时 hook: {runtime_hook_file}")
 
     # UPX 路径
-    upx_path = 'upx'
+    upx_path = "upx"
     for path in [
-        os.path.join(script_dir, 'upx.exe'),
-        os.path.join(os.path.dirname(sys.executable), 'upx.exe'),
+        os.path.join(script_dir, "upx.exe"),
+        os.path.join(os.path.dirname(sys.executable), "upx.exe"),
     ]:
         if os.path.exists(path):
             upx_path = path
             break
-    upx_dir = os.path.dirname(upx_path) if upx_path != 'upx' else ''
-    print(f'[+] UPX: {upx_path}')
+    upx_dir = os.path.dirname(upx_path) if upx_path != "upx" else ""
+    print(f"[+] UPX: {upx_path}")
 
     # 使用正斜杠避免 SyntaxWarning
-    sd = script_dir.replace('\\', '/')
-    rth = runtime_hook_file.replace('\\', '/')
-    upx_d = upx_dir.replace('\\', '/') if upx_dir else ''
+    sd = script_dir.replace("\\", "/")
+    rth = runtime_hook_file.replace("\\", "/")
+    upx_d = upx_dir.replace("\\", "/") if upx_dir else ""
 
     # 收集需要打包的数据文件（终端IP地址表改为运行时外部导入，不打包）
     datas = []
-    for fname in ('config.ini', 'office.ico'):
+    for fname in ("config.ini", "office.ico"):
         if os.path.exists(os.path.join(script_dir, fname)):
             datas.append(f"('{fname}', '.')")
     # 把 certifi 的 cacert.pem 作为 data 打包到 certifi/ 目录，避免 frozen 模式 certifi.where() 找不到
     try:
         import certifi
+
         _cacert = certifi.where()
         if os.path.exists(_cacert):
-            _src = _cacert.replace('\\', '/')
+            _src = _cacert.replace("\\", "/")
             datas.append(f"(r'{_src}', 'certifi')")
-            print(f'[+] 打包 CA 证书: {_cacert}')
+            print(f"[+] 打包 CA 证书: {_cacert}")
     except Exception as _e:
-        print(f'[!] 未找到 certifi cacert.pem ({_e})，跳过')
-    datas_str = ',\n        '.join(datas) if datas else ''
+        print(f"[!] 未找到 certifi cacert.pem ({_e})，跳过")
+    datas_str = ",\n        ".join(datas) if datas else ""
 
-    spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
+    spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
 
 a = Analysis(
@@ -266,23 +273,25 @@ exe = EXE(
     entitlements_file=None,
     icon='office.ico',
 )
-'''
+"""
 
-    spec_file = os.path.join(script_dir, 'build_exe.spec')
-    with open(spec_file, 'w', encoding='utf-8') as f:
+    spec_file = os.path.join(script_dir, "build_exe.spec")
+    with open(spec_file, "w", encoding="utf-8") as f:
         f.write(spec_content)
 
     # 设置缓存目录
     env = os.environ.copy()
-    env['PYINSTALLER_CONFIG_DIR'] = os.path.join(script_dir, 'build', 'pyinstaller_cache')
+    env["PYINSTALLER_CONFIG_DIR"] = os.path.join(script_dir, "build", "pyinstaller_cache")
 
     cmd = [
-        sys.executable, '-m', 'PyInstaller',
+        sys.executable,
+        "-m",
+        "PyInstaller",
         spec_file,
-        '--distpath=dist',
-        '--workpath=build',
+        "--distpath=dist",
+        "--workpath=build",
     ]
-    print(f'[+] 执行打包: {" ".join(cmd)}')
+    print(f"[+] 执行打包: {' '.join(cmd)}")
     subprocess.check_call(cmd, env=env)
 
     # 清理临时 spec
@@ -290,53 +299,52 @@ exe = EXE(
         os.remove(spec_file)
 
     # 检查结果
-    exe_path = os.path.join(dist_dir, '网络安全值守日报.exe')
+    exe_path = os.path.join(dist_dir, "网络安全值守日报.exe")
     if os.path.exists(exe_path):
         exe_size = os.path.getsize(exe_path) / (1024 * 1024)
-        print('[OK] 打包完成！')
-        print(f'    文件: {exe_path}')
-        print(f'    大小: {exe_size:.2f} MB')
+        print("[OK] 打包完成！")
+        print(f"    文件: {exe_path}")
+        print(f"    大小: {exe_size:.2f} MB")
     else:
-        print('[-] 打包失败，exe文件未生成')
+        print("[-] 打包失败，exe文件未生成")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='网络安全值守日报 - 打包工具')
-    parser.add_argument('--version', '-V', type=str, default=None,
-                        help='手动指定版本号（如 1.1.0），优先于 Git 标签')
+    parser = argparse.ArgumentParser(description="网络安全值守日报 - 打包工具")
+    parser.add_argument("--version", "-V", type=str, default=None, help="手动指定版本号（如 1.1.0），优先于 Git 标签")
     args = parser.parse_args()
 
-    print('=' * 60)
-    print('网络安全值守日报 - 打包工具（单文件模式）')
-    print('=' * 60)
+    print("=" * 60)
+    print("网络安全值守日报 - 打包工具（单文件模式）")
+    print("=" * 60)
 
     # 版本号解析：--version > pyproject.toml（单一真源）> Git 标签 > 保持不变
     target_version = None
     if args.version:
         target_version = args.version.strip()
-        print(f'[+] 使用命令行指定版本号: {target_version}')
+        print(f"[+] 使用命令行指定版本号: {target_version}")
     else:
         pp_ver = get_pyproject_version()
         if pp_ver:
             target_version = pp_ver
-            print(f'[+] 使用 pyproject.toml 版本号: {target_version}')
+            print(f"[+] 使用 pyproject.toml 版本号: {target_version}")
         else:
             git_ver = get_git_version()
             if git_ver:
                 target_version = git_ver
-                print(f'[+] 使用 Git 标签版本号: {target_version}')
+                print(f"[+] 使用 Git 标签版本号: {target_version}")
             else:
-                print('[!] 未获取到版本号，将使用 main.py 中现有版本')
+                print("[!] 未获取到版本号，将使用 main.py 中现有版本")
 
     if target_version:
         set_app_version(target_version)
-    print('[!] ip2region数据库不打包，运行时自动下载')
-    print('=' * 60)
+    print("[!] ip2region数据库不打包，运行时自动下载")
+    print("=" * 60)
 
     install_pyinstaller()
     # 当前更新方案：沿用 --update-worker 模式（由 main.py 自身完成自更新，无外部依赖）
     build_exe()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

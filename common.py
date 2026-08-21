@@ -15,12 +15,12 @@ from datetime import datetime
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 运行时基础目录（打包后优先使用exe所在目录）
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     # 单文件模式：优先使用exe所在目录，用户的数据文件放在这里
     exe_dir = os.path.dirname(sys.executable)
     runtime_dir = exe_dir
     # 记录临时解压目录，用于读取内置资源
-    if hasattr(sys, '_MEIPASS'):
+    if hasattr(sys, "_MEIPASS"):
         meipass_dir = sys._MEIPASS
     else:
         meipass_dir = None
@@ -34,12 +34,12 @@ _gui_log_callback = None
 _gui_progress_callback = None
 
 # ---- 日志级别 ----
-INFO = 'INFO'
-WARN = 'WARN'
-ERROR = 'ERROR'
+INFO = "INFO"
+WARN = "WARN"
+ERROR = "ERROR"
 
 # 文件日志路径（追加；*.log 已在 .gitignore，不入库）
-_log_file_path = os.path.join(runtime_dir, 'app.log')
+_log_file_path = os.path.join(runtime_dir, "app.log")
 
 
 def set_gui_callbacks(log_cb=None, progress_cb=None):
@@ -58,8 +58,8 @@ def set_gui_callbacks(log_cb=None, progress_cb=None):
 def _append_log_file(msg, level=INFO):
     """追加写文件日志（带日期时间戳），失败不影响主流程"""
     try:
-        with open(_log_file_path, 'a', encoding='utf-8') as f:
-            f.write(f'[{datetime.now():%Y-%m-%d %H:%M:%S}] [{level}] {msg}\n')
+        with open(_log_file_path, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [{level}] {msg}\n")
     except Exception:
         pass
 
@@ -75,7 +75,7 @@ def _log(msg, level=INFO):
     if _gui_log_callback:
         _gui_log_callback(msg)
     else:
-        print(f'[{datetime.now():%H:%M:%S}] [{level}] {msg}', flush=True)
+        print(f"[{datetime.now():%H:%M:%S}] [{level}] {msg}", flush=True)
 
 
 def _log_warn(msg):

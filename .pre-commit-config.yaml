@@ -1,6 +1,8 @@
 # pre-commit 配置：提交前自动执行 ruff 检查（代码风格/未用导入/格式）
 # 安装：pip install pre-commit && pre-commit install
-# 手动跑全部：pre-commit run --all-files
+# 手动跑全部：pre-commit run --all-files（若遇 ruff 双钩子写文件冲突，用 --serial 串行）
+# 注意：本机 git 走 Schannel 证书吊销检查被内网拦截，pre-commit 首次拉 hook 仓库
+# 需 `GIT_SSL_NO_VERIFY=true`（已在此环境实测；hook 环境装好后无需每次设置）
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.3

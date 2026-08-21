@@ -79,7 +79,7 @@ UPDATE_EXE_URLS = [
 def parse_version(v):
     """把版本号字符串解析为可比较的整数元组（如 '1.10.0' -> (1,10,0)）"""
     parts = []
-    for x in re.findall(r'\d+', str(v)):
+    for x in re.findall(r"\d+", str(v)):
         try:
             parts.append(int(x))
         except (ValueError, TypeError):
@@ -89,17 +89,19 @@ def parse_version(v):
 
 # ---------------- 网络 / SSL 基础设施 ----------------
 
+
 def get_requests_verify():
     """返回 requests 可用的 verify 参数。
     - 若 certifi 的 CA bundle 实际可用（路径存在且能被 ssl 创建 context）则用该路径；
     - 否则返回 True，让 requests 走默认/环境变量；
     - 最终 SSL 若仍失败，调用方的降级逻辑会再降到 verify=False。"""
     try:
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             try:
                 import ssl
 
                 import certifi
+
                 ca_path = certifi.where()
                 # PyInstaller certifi hook 有时把 cacert.pem 放到多个目录，
                 # certifi.where() 返回的路径虽 os.path.exists 为 True，
@@ -111,10 +113,10 @@ def get_requests_verify():
                         ssl.create_default_context(cafile=ca_path)  # 仅验证 PEM 可加载（无异常即合法）
                         # 没异常说明 cafile 合法
                         # 但仍需要避免重复覆盖 REQUESTS_CA_BUNDLE（运行时 hook 已经设置过）
-                        if 'REQUESTS_CA_BUNDLE' not in os.environ:
-                            os.environ['REQUESTS_CA_BUNDLE'] = ca_path
-                        if 'SSL_CERT_FILE' not in os.environ:
-                            os.environ['SSL_CERT_FILE'] = ca_path
+                        if "REQUESTS_CA_BUNDLE" not in os.environ:
+                            os.environ["REQUESTS_CA_BUNDLE"] = ca_path
+                        if "SSL_CERT_FILE" not in os.environ:
+                            os.environ["SSL_CERT_FILE"] = ca_path
                         return ca_path
                     except Exception:
                         # cafile 虽存在但不可用，直接返回 True（用系统默认），
@@ -130,13 +132,22 @@ def get_requests_verify():
 def is_ssl_or_ca_error(exc):
     """判断异常是否属于 SSL/TLS/CA bundle 相关，意味着 verify=False 大概率可绕过。"""
     import requests
+
     _s = str(exc) + type(exc).__name__
     _u = _s.upper()
     if isinstance(exc, requests.exceptions.SSLError):
         return True
-    for kw in ("SSL", "TLS", "CERTIFICATE", "CERTIFICATE_VERIFY_FAILED",
-              "CERTIFICATE BUNDLE", "INVALID PATH", "CERT", "HANDSHAKE",
-              "UNABLE TO GET LOCAL ISSUER CERTIFICATE"):
+    for kw in (
+        "SSL",
+        "TLS",
+        "CERTIFICATE",
+        "CERTIFICATE_VERIFY_FAILED",
+        "CERTIFICATE BUNDLE",
+        "INVALID PATH",
+        "CERT",
+        "HANDSHAKE",
+        "UNABLE TO GET LOCAL ISSUER CERTIFICATE",
+    ):
         if kw in _u:
             return True
     if isinstance(exc, OSError) and ("CERTIFICATE" in _u or "BUNDLE" in _u or "INVALID PATH" in _u):
@@ -157,6 +168,7 @@ def safe_get(url, ssl_fallback_msg=None, log_cb=None, **kwargs):
     避免成功路径被 "SSL验证失败" 这种误报信息打扰。
     """
     import requests
+
     verify = get_requests_verify()
     try:
         resp = requests.get(url, verify=verify, **kwargs)
@@ -172,6 +184,7 @@ def safe_get(url, ssl_fallback_msg=None, log_cb=None, **kwargs):
 
 # ---------------- 更新源配置 ----------------
 
+
 def load_update_config():
     """从 config.ini [update] 段读取自定义更新源（内网部署用）。
 
@@ -179,23 +192,25 @@ def load_update_config():
     调用方据此回退到内置 GitHub 源。支持 http/https 与本地/共享路径
     （如 //server/share/version.json）；exe_urls 模板支持 {version} 占位符。
     """
-    if not os.path.exists(os.path.join(runtime_dir, 'config.ini')):
+    if not os.path.exists(os.path.join(runtime_dir, "config.ini")):
         return [], []
     try:
         _cfg = configparser.ConfigParser()
-        _cfg.read(os.path.join(runtime_dir, 'config.ini'), encoding='utf-8')
-        if not _cfg.has_section('update'):
+        _cfg.read(os.path.join(runtime_dir, "config.ini"), encoding="utf-8")
+        if not _cfg.has_section("update"):
             return [], []
+
         def _split(val):
             out = []
-            for line in (val or '').splitlines():
+            for line in (val or "").splitlines():
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
                 out.append(line)
             return out
-        vu = _split(_cfg.get('update', 'version_urls', fallback=''))
-        eu = _split(_cfg.get('update', 'exe_urls', fallback=''))
+
+        vu = _split(_cfg.get("update", "version_urls", fallback=""))
+        eu = _split(_cfg.get("update", "exe_urls", fallback=""))
         return vu, eu
     except Exception:
         return [], []
@@ -203,10 +218,17 @@ def load_update_config():
 
 # ---------------- 自动更新核心 ----------------
 
+
 class AutoUpdater:
-    def __init__(self, current_version='0.0.0',
-                 version_urls=None, exe_urls=None,
-                 progress_cb=None, log_cb=None, ask_confirm_cb=None):
+    def __init__(
+        self,
+        current_version="0.0.0",
+        version_urls=None,
+        exe_urls=None,
+        progress_cb=None,
+        log_cb=None,
+        ask_confirm_cb=None,
+    ):
         # 当前版本号由调用方注入（通常是 main.APP_VERSION），updater 不反向依赖业务模块
         self.current_version = current_version
         self.version_urls = version_urls or UPDATE_VERSION_URLS
@@ -216,8 +238,8 @@ class AutoUpdater:
         self.ask_confirm_cb = ask_confirm_cb or (lambda msg: True)
         self._latest_info = None
         self.custom_source = bool(version_urls)  # 是否使用了 config 自定义源（通常是内网）
-        self.last_check_error = None   # 版本信息获取失败原因（用于区分"已是最新"）
-        self.last_status = None        # 更新流程终态：发现新版本/已是最新/检查失败/下载失败/安装失败/用户取消
+        self.last_check_error = None  # 版本信息获取失败原因（用于区分"已是最新"）
+        self.last_status = None  # 更新流程终态：发现新版本/已是最新/检查失败/下载失败/安装失败/用户取消
 
     def _fetch_latest_release_api(self):
         """通过 GitHub API 获取最新 release（无 CDN 缓存，始终返回真实最新版）。
@@ -232,7 +254,8 @@ class AutoUpdater:
         """
         try:
             import importlib.util
-            if importlib.util.find_spec('requests') is None:
+
+            if importlib.util.find_spec("requests") is None:
                 raise ImportError
         except ImportError:
             self.log_cb("[版本] 缺少 requests 库，跳过 GitHub API 检查")
@@ -241,18 +264,18 @@ class AutoUpdater:
             r = safe_get(
                 GITHUB_API_LATEST,
                 timeout=10,
-                headers={'User-Agent': 'daily-report-updater'},
-                ssl_fallback_msg='[版本] GitHub API SSL验证失败，跳过证书验证重试',
+                headers={"User-Agent": "daily-report-updater"},
+                ssl_fallback_msg="[版本] GitHub API SSL验证失败，跳过证书验证重试",
                 log_cb=self.log_cb,
             )
             data = r.json()
-            tag = data.get('tag_name', '') or ''
-            version = tag.lstrip('vV').strip()
+            tag = data.get("tag_name", "") or ""
+            version = tag.lstrip("vV").strip()
             # 找到 .exe 资产
             asset_url = None
-            for a in data.get('assets', []) or []:
-                if (a.get('name') or '').lower().endswith('.exe'):
-                    asset_url = a.get('browser_download_url')
+            for a in data.get("assets", []) or []:
+                if (a.get("name") or "").lower().endswith(".exe"):
+                    asset_url = a.get("browser_download_url")
                     break
             if not version or not asset_url:
                 return None
@@ -260,11 +283,11 @@ class AutoUpdater:
             exe_urls = [p + asset_url for p in CDN_MIRROR_PREFIXES]
             self.log_cb(f"[版本] GitHub API 获取最新版本成功 (version={version}, tag={tag})")
             return {
-                'version': version,
-                'exe_urls': exe_urls,
-                'md5': None,  # API 不提供 md5，下载时跳过 MD5 校验
-                'release_note': data.get('body', '') or '',
-                'force_update': False,
+                "version": version,
+                "exe_urls": exe_urls,
+                "md5": None,  # API 不提供 md5，下载时跳过 MD5 校验
+                "release_note": data.get("body", "") or "",
+                "force_update": False,
             }
         except Exception as exc:
             self.log_cb(f"[版本] GitHub API 获取失败: {exc}")
@@ -275,9 +298,9 @@ class AutoUpdater:
             return None
         for url in self.version_urls:
             try:
-                if url.startswith('http://') or url.startswith('https://'):
+                if url.startswith("http://") or url.startswith("https://"):
                     # CDN 防缓存：加 ?t=时间戳（raw 本身不缓存；ghproxy 镜像也不长缓存）
-                    if '?' in url:
+                    if "?" in url:
                         fetch_url = f"{url}&t={int(time.time())}"
                     else:
                         fetch_url = f"{url}?t={int(time.time())}"
@@ -286,9 +309,10 @@ class AutoUpdater:
                 else:
                     # 共享目录 / 本地文件
                     import json
-                    with open(url, encoding='utf-8') as f:
+
+                    with open(url, encoding="utf-8") as f:
                         data = json.load(f)
-                if isinstance(data, dict) and 'version' in data:
+                if isinstance(data, dict) and "version" in data:
                     self.log_cb(f"[版本] 从 {url} 获取版本信息成功 (version={data.get('version')})")
                     return data
             except Exception as exc:
@@ -297,7 +321,7 @@ class AutoUpdater:
 
     def _eval_and_return(self, data):
         """根据版本号判断是否有新版本，并记录状态后返回 info 或 None。"""
-        latest_ver = data.get('version', '0.0.0')
+        latest_ver = data.get("version", "0.0.0")
         self.log_cb(f"[版本] 当前版本 v{self.current_version} | 最新版本 v{latest_ver}")
         if parse_version(latest_ver) > parse_version(self.current_version):
             self.log_cb(f"[版本] 发现新版本 v{latest_ver}，准备更新")
@@ -333,17 +357,19 @@ class AutoUpdater:
 
     def _download(self, url, dest_path, expected_md5=None):
         file_size = 0
-        if url.startswith('http://') or url.startswith('https://'):
+        if url.startswith("http://") or url.startswith("https://"):
             resp = safe_get(
-                url, timeout=(30, 600), stream=True,
-                ssl_fallback_msg='[更新] 下载SSL验证失败，跳过证书验证重试',
+                url,
+                timeout=(30, 600),
+                stream=True,
+                ssl_fallback_msg="[更新] 下载SSL验证失败，跳过证书验证重试",
                 log_cb=self.log_cb,
             )
-            total = int(resp.headers.get('content-length', 0))
+            total = int(resp.headers.get("content-length", 0))
             if total > 0:
                 self.progress_cb(0, total)
             downloaded = 0
-            with open(dest_path, 'wb') as f:
+            with open(dest_path, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=1024 * 1024):
                     if chunk:
                         f.write(chunk)
@@ -357,6 +383,7 @@ class AutoUpdater:
             if total > 0:
                 self.progress_cb(0, total)
             import shutil
+
             shutil.copy2(url, dest_path)
             self.progress_cb(total, total)
             file_size = total
@@ -364,9 +391,10 @@ class AutoUpdater:
         # MD5 校验
         if expected_md5:
             import hashlib
+
             h = hashlib.md5()
-            with open(dest_path, 'rb') as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            with open(dest_path, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
                     h.update(chunk)
             actual = h.hexdigest().lower()
             if actual != expected_md5.lower():
@@ -378,11 +406,11 @@ class AutoUpdater:
     def _resolve_exe_urls(self, info):
         """解析 EXE 下载地址列表，支持 exe_urls(数组/CDN回退) 和 exe_url(单字符串/兼容)"""
         if info:
-            if info.get('exe_urls'):
-                return info['exe_urls']
-            if info.get('exe_url'):
-                return [info['exe_url']]
-        version = info.get('version', '') if info else ''
+            if info.get("exe_urls"):
+                return info["exe_urls"]
+            if info.get("exe_url"):
+                return [info["exe_url"]]
+        version = info.get("version", "") if info else ""
         urls = []
         for url in self.exe_urls:
             try:
@@ -403,13 +431,14 @@ class AutoUpdater:
             return None
 
         import tempfile
+
         tmp_dir = tempfile.gettempdir()
         tmp_exe = os.path.join(tmp_dir, f"report_update_{int(time.time())}.exe")
 
         for idx, exe_url in enumerate(exe_urls):
             try:
                 self.log_cb(f"[更新] 下载新版本 v{info.get('version')}: {exe_url}")
-                size = self._download(exe_url, tmp_exe, info.get('md5'))
+                size = self._download(exe_url, tmp_exe, info.get("md5"))
                 self.log_cb(f"[更新] 下载完成: {size // 1024 // 1024} MB")
                 return tmp_exe
             except Exception as exc:
@@ -418,7 +447,7 @@ class AutoUpdater:
                     if os.path.exists(tmp_exe):
                         os.remove(tmp_exe)
                 except OSError as e:
-                    self.log_cb(f'[!] 清理临时文件失败: {e}')
+                    self.log_cb(f"[!] 清理临时文件失败: {e}")
                 if idx < len(exe_urls) - 1:
                     self.log_cb("[更新] 尝试下一个镜像源...")
                 else:
@@ -428,7 +457,7 @@ class AutoUpdater:
     def install_and_restart(self, new_exe_path):
         if not new_exe_path or not os.path.exists(new_exe_path):
             return False
-        if not getattr(sys, 'frozen', False):
+        if not getattr(sys, "frozen", False):
             self.log_cb("[更新] 源码模式跳过安装（仅EXE模式支持自动替换）")
             return False
 
@@ -470,18 +499,22 @@ class AutoUpdater:
             self.log_cb(f"[更新] 复制 Worker 副本失败: {exc}")
             return False
 
-        params_json = json.dumps({
-            'parentPid': parent_pid,
-            'oldExe':  old_exe,
-            'newExe':  new_exe_path,
-            'bakExe':  backup_exe,
-            'workDir': old_dir,
-            'jsonPath': json_params_path,
-            'workerExe': worker_exe,
-        }, ensure_ascii=False, indent=2)
+        params_json = json.dumps(
+            {
+                "parentPid": parent_pid,
+                "oldExe": old_exe,
+                "newExe": new_exe_path,
+                "bakExe": backup_exe,
+                "workDir": old_dir,
+                "jsonPath": json_params_path,
+                "workerExe": worker_exe,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
         try:
-            with open(json_params_path, 'w', encoding='utf-8') as f:
+            with open(json_params_path, "w", encoding="utf-8") as f:
                 f.write(params_json)
         except Exception as exc:
             self.log_cb(f"[更新] 写入参数文件失败: {exc}")
@@ -493,7 +526,7 @@ class AutoUpdater:
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
 
-        worker_arg = f'--update-worker={json_params_path}'
+        worker_arg = f"--update-worker={json_params_path}"
         try:
             # 用 STARTUPINFO + stdio 重定向确保更新 Worker 完全不弹控制台窗口，
             # 避免中文标题/路径在错误代码页下出现乱码（旧版 find /I 命令的坑）。
@@ -522,12 +555,15 @@ class AutoUpdater:
         info = self.check_update()
         if not info:
             if force_dialog:
-                self.log_cb("[更新] 当前已是最新版本" if self.last_status == "已是最新"
-                           else f"[更新] 检查失败: {self.last_check_error}")
+                self.log_cb(
+                    "[更新] 当前已是最新版本"
+                    if self.last_status == "已是最新"
+                    else f"[更新] 检查失败: {self.last_check_error}"
+                )
             return False
-        ver = info.get('version', '?')
-        note = info.get('release_note', '')
-        force = bool(info.get('force_update', False))
+        ver = info.get("version", "?")
+        note = info.get("release_note", "")
+        force = bool(info.get("force_update", False))
 
         prompt = f"发现新版本 v{ver}\n\n当前版本: v{self.current_version}\n新版本: v{ver}"
         if note:
@@ -551,6 +587,7 @@ class AutoUpdater:
 
 # ---------------- 更新 Worker（安装/覆盖/重启） ----------------
 
+
 def update_worker_main(json_path):
     """
     更新 Worker 模式：不加载 GUI，纯文件操作。
@@ -568,23 +605,24 @@ def update_worker_main(json_path):
 
     # ===== 解析参数 =====
     try:
-        with open(json_path, encoding='utf-8') as f:
+        with open(json_path, encoding="utf-8") as f:
             params = json.load(f)
-        parent_pid = int(params['parentPid'])
-        old_exe    = str(params['oldExe'])
-        new_exe    = str(params['newExe'])
-        bak_exe    = str(params['bakExe'])
-        work_dir   = str(params['workDir'])
-        cleanups   = [str(params['jsonPath'])]
-        if 'ps1Path' in params and params['ps1Path']:
-            cleanups.append(str(params['ps1Path']))
-        worker_exe = str(params.get('workerExe', ''))
+        parent_pid = int(params["parentPid"])
+        old_exe = str(params["oldExe"])
+        new_exe = str(params["newExe"])
+        bak_exe = str(params["bakExe"])
+        work_dir = str(params["workDir"])
+        cleanups = [str(params["jsonPath"])]
+        if "ps1Path" in params and params["ps1Path"]:
+            cleanups.append(str(params["ps1Path"]))
+        worker_exe = str(params.get("workerExe", ""))
     except Exception as e:
         # 尽量写日志（优先临时目录，避免 exe 目录无写权限）
         try:
             import tempfile as _tf
-            log = os.path.join(_tf.gettempdir(), 'update_last.log')
-            with open(log, 'a', encoding='utf-8') as f:
+
+            log = os.path.join(_tf.gettempdir(), "update_last.log")
+            with open(log, "a", encoding="utf-8") as f:
                 f.write(f"[{datetime.now():%H:%M:%S}] 参数解析失败: {e}\n")
         except Exception:
             pass
@@ -592,16 +630,17 @@ def update_worker_main(json_path):
 
     # 日志双写：优先临时目录（保证有写权限），同时尝试 exe 同目录（方便用户找）
     import tempfile as _tf
-    _tmp_log = os.path.join(_tf.gettempdir(), 'update_last.log')
-    _exe_log = os.path.join(work_dir, 'update_last.log')
+
+    _tmp_log = os.path.join(_tf.gettempdir(), "update_last.log")
+    _exe_log = os.path.join(work_dir, "update_last.log")
 
     def wlog(msg):
-        ts = datetime.now().strftime('%H:%M:%S')
+        ts = datetime.now().strftime("%H:%M:%S")
         # 双写：优先临时目录（一定有权限），同时尝试 exe 同目录（方便用户找）
         for _p in (_tmp_log, _exe_log):
             try:
-                with open(_p, 'a', encoding='utf-8') as f:
-                    f.write(f'[{ts}] {msg}\n')
+                with open(_p, "a", encoding="utf-8") as f:
+                    f.write(f"[{ts}] {msg}\n")
             except Exception:
                 pass
 
@@ -615,9 +654,11 @@ def update_worker_main(json_path):
     try:
         import ctypes
         from ctypes import wintypes
-        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         SYNCHRONIZE = 0x00100000
+
         def _is_alive(pid):
             h = k32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, wintypes.DWORD(pid))
             if not h:
@@ -629,18 +670,20 @@ def update_worker_main(json_path):
             return r == WAIT_TIMEOUT
     except Exception as e:
         wlog(f"OpenProcess 不可用 ({e})，降级用 psutil/tasklist")
+
         def _is_alive(pid):
             # 兜底：tasklist /FO CSV 数字匹配（隐藏窗口，防止闪现乱码）
             try:
                 import subprocess as _sp
+
                 startupinfo = _sp.STARTUPINFO()
                 startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = _sp.SW_HIDE
                 out = _sp.check_output(
-                    ['tasklist', '/FI', f'PID eq {pid}', '/NH', '/FO', 'CSV'],
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
                     stderr=_sp.DEVNULL,
                     startupinfo=startupinfo,
-                ).decode('gbk', errors='replace')
+                ).decode("gbk", errors="replace")
                 return f'"{pid}"' in out
             except Exception:
                 return False
@@ -660,6 +703,7 @@ def update_worker_main(json_path):
     if os.path.exists(old_exe):
         try:
             import shutil as _su
+
             _su.copy2(old_exe, bak_exe)
             wlog(f"已备份 -> {os.path.basename(bak_exe)}")
         except Exception as e:
@@ -669,16 +713,19 @@ def update_worker_main(json_path):
     ok = False
     last_err = None
     import shutil as _su
+
     for i in range(1, 6):
         try:
             _su.copy2(new_exe, old_exe)
+
             # 验证 MD5 一致
             def md5(p):
                 h = hashlib.md5()
-                with open(p, 'rb') as f:
-                    for c in iter(lambda: f.read(1024*1024), b''):
+                with open(p, "rb") as f:
+                    for c in iter(lambda: f.read(1024 * 1024), b""):
                         h.update(c)
                 return h.hexdigest().lower()
+
             if md5(old_exe) != md5(new_exe):
                 raise RuntimeError("覆盖后 MD5 不一致")
             wlog(f"覆盖成功 ({i}/5)，MD5 校验通过")
@@ -710,12 +757,17 @@ def update_worker_main(json_path):
         # 注意：不使用 close_fds=True 与 creationflags 同时传时在老 Python 有兼容
         # 直接用 subprocess.Popen(executable, cwd=work_dir)，且不指定 stdio
         import subprocess as _sp
+
         startupinfo = _sp.STARTUPINFO()
         startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = _sp.SW_HIDE
         _sp.Popen(
-            [old_exe], cwd=work_dir, creationflags=flags,
-            stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            [old_exe],
+            cwd=work_dir,
+            creationflags=flags,
+            stdin=_sp.DEVNULL,
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
             startupinfo=startupinfo,
         )
         wlog("已启动新程序 (Popen+DETACHED)")
@@ -724,7 +776,7 @@ def update_worker_main(json_path):
         wlog(f"Popen 启动失败: {e}")
         try:
             # 兜底：os.startfile
-            if hasattr(os, 'startfile'):
+            if hasattr(os, "startfile"):
                 os.startfile(old_exe)
                 wlog("已启动新程序 (os.startfile 兜底)")
                 started_ok = True
@@ -733,7 +785,7 @@ def update_worker_main(json_path):
 
     # ===== 清理临时文件 =====
     # Worker 自身（sys.executable）正在运行，不能删除；其余可清理
-    _worker_self = os.path.abspath(sys.executable) if getattr(sys, 'frozen', False) else None
+    _worker_self = os.path.abspath(sys.executable) if getattr(sys, "frozen", False) else None
     for p in [new_exe, bak_exe] + cleanups + ([worker_exe] if worker_exe else []):
         if _worker_self and os.path.abspath(p) == _worker_self:
             wlog(f"跳过清理（Worker自身）: {os.path.basename(p)}")
