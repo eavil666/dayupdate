@@ -54,3 +54,6 @@ config.ini
 .env
 # 但提交 .env.example 模板（脱敏，供参考）
 !.env.example
+
+# === WorkBuddy 项目记忆（本地工具数据，可能含 token 引用，不入库）===
+.workbuddy/
