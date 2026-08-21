@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 版本号（如 1.6.0）；留空则从 pyproject.toml 读取
+        description: 版本号（如 1.6.1）；留空则从 pyproject.toml 读取。测试/发布请填【新】版本号，勿用已发布的版本（会覆盖该版本 Release）
         required: false
         default: ""
   push:
@@ -88,6 +88,11 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: 推送 version.json 到 main
+      - name: 推送 version.json 到当前分支（仅 branch 触发；不触碰 main）
+        shell: bash
         run: |
-          git push origin HEAD:main || echo "main 推送失败（可能被并发改动），version.json 保持本地；Release 已创建"
+          if [ "${GITHUB_REF_TYPE}" = "branch" ]; then
+            git push origin HEAD:"${GITHUB_REF_NAME}" && echo "version.json 已推送到 ${GITHUB_REF_NAME}"
+          else
+            echo "tag 触发（${GITHUB_REF_NAME}）：version.json 已由本地发布流程更新，跳过推送"
+          fi
