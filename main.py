@@ -98,7 +98,7 @@ def _import_failed(name):
 ensure_deps()
 
 # ================ 版本 ================
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 # 自动更新逻辑已拆分至 updater.py；GUI 版本号经 gui_main(app_version) 注入
 
 

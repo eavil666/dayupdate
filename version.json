@@ -1,13 +1,13 @@
 {
-  "version": "1.5.0",
+  "version": "1.6.0",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.5.0/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.5.0/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.5.0/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.5.0/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.5.0/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.6.0/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.6.0/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.6.0/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.6.0/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.6.0/daily-report.exe"
   ],
-  "md5": "00488F9DF8C8997A0D894D10C12E9091",
-  "release_note": "v1.4.0\n- 自动更新模块重构：更新源改为 config.ini 可配置（[update] 段），支持内网 HTTP / 共享目录兜底，不再强依赖 GitHub\n- 更新检查失败显式弹窗提示（区分「网络不可达」与「已是最新」），不再静默吞错\n- 修复 requests 缺失时更新检查崩溃的健壮性问题\n- 构建时内置 certifi CA 证书，修复冻结模式 ssl 校验路径问题\n- 基于 Python 3.14 重新打包",
+  "md5": "8AC74AF4F753200178CCA585E877748B",
+  "release_note": "v1.6.0（分支 refactor/b-module-split 基线）\n- 代码结构重构：main.py 从 2413 行瘦身为 161 行纯入口，拆分 common/updater/ipdb/report/gui 五个模块\n- A档：删除重复 download_xdb 死代码；抽 safe_get 统一 SSL 失败降级重试；read/set 版本共用 APP_VERSION_RE\n- B档：更新逻辑独立 updater.py（更新源配置/SSL降级/AutoUpdater/update_worker）；通用工具 common.py\n- C档：pyproject.toml 版本单一真源；pytest 24 用例测试套件；GitHub Actions CI（release.yml）\n- 方案一：业务域拆分 ipdb.py（IP归属）/ report.py（日报）/ gui.py（GUI）\n- 修复：GitHub 更新源在证书吊销检查被拦截时自动降级跳过证书验证重试",
   "force_update": false
 }
