@@ -1,13 +1,13 @@
 {
-  "version": "1.6.1",
+  "version": "1.7.0",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.6.1/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.6.1/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.6.1/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.6.1/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.6.1/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe"
   ],
-  "md5": "A74FB848EF114A64A4FD9D863CC612A9",
-  "release_note": "v1.6.0（分支 refactor/b-module-split 基线）\n- 代码结构重构：main.py 从 2413 行瘦身为 161 行纯入口，拆分 common/updater/ipdb/report/gui 五个模块\n- A档：删除重复 download_xdb 死代码；抽 safe_get 统一 SSL 失败降级重试；read/set 版本共用 APP_VERSION_RE\n- B档：更新逻辑独立 updater.py（更新源配置/SSL降级/AutoUpdater/update_worker）；通用工具 common.py\n- C档：pyproject.toml 版本单一真源；pytest 24 用例测试套件；GitHub Actions CI（release.yml）\n- 方案一：业务域拆分 ipdb.py（IP归属）/ report.py（日报）/ gui.py（GUI）\n- 修复：GitHub 更新源在证书吊销检查被拦截时自动降级跳过证书验证重试",
+  "md5": "5272F891EACC2EB941B4C56CFC2BDA12",
+  "release_note": "v1.7.0（分支 refactor/b-module-split 基线）\n新功能：\n1. 威胁分级：外网IP归属分析新增\"威胁分级\"列——自动匹配 EmergingThreats/AbuseFeodo/BlocklistDE 三大公开威胁源，分级 Critical/High/Clean，命中源可视化（如 High(BlocklistDE)），名单磁盘缓存6小时，断网自动降级不阻塞\n2. 配置解放：业务IP/探针/内网区域/本地归属地全部从 Excel 自动读取，config.ini 仅剩结构参数\n3. GUI 新增\"本地归属地\"输入框（默认长春，可自定义，合并进判定）\n4. 告警趋势图：openpyxl 原生内嵌图表（威胁等级/攻击类型/24h趋势）\n工程化：\n5. 代码重构：main.py 瘦身为纯入口，拆分 common/updater/ipdb/report/gui 模块\n6. pytest 48 用例 + 覆盖率 53% 门槛；ruff + pre-commit 代码规范\n7. 日志系统升级（时间戳/级别/文件）；SSL 降级静默、config 容错\n8. release.py 分支参数化；GitHub Actions CI 双 job（Linux 测试+Windows 构建）",
   "force_update": false
 }
