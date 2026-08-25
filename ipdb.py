@@ -738,6 +738,21 @@ def generate_ip_report(files, date, local_geos=None):
     internal_ip_list = list(all_internal_ips)
     excluded_ip_list = list(all_excluded_ips)
     location_map = query_all_ips(external_ip_list)
+    # 威胁分级：公开威胁源匹配（threat_check 模块，磁盘缓存 6 小时；失败/超时降级"未查"）
+    bad_ips, threat_sources = set(), {}
+    try:
+        from threat_check import check_ip as _threat_check_ip
+        from threat_check import load_bad_ips
+
+        _cache_file = Path(runtime_dir) / "threat_feeds_cache.json"
+        bad_ips, threat_sources = load_bad_ips(str(_cache_file))
+        if bad_ips:
+            _log(f"[+] 威胁名单加载: {len(bad_ips)} 条（缓存 {_cache_file.name}）")
+        else:
+            _log("[!] 威胁名单为空（网络不可达？），外网IP威胁分级显示为 未查")
+    except Exception as _e:
+        _log(f"[!] 威胁分级初始化失败: {_e}")
+        bad_ips, threat_sources = set(), {}
     # 查询排除IP的归属地
     excluded_location_map = query_all_ips(excluded_ip_list) if excluded_ip_list else {}
     load_terminal_ip_table()
@@ -766,12 +781,23 @@ def generate_ip_report(files, date, local_geos=None):
 
     ws1 = wb.active
     ws1.title = "外网攻击IP归属"
-    headers1 = ["序号", "IP地址", "归属地", "备注"]
+    headers1 = ["序号", "IP地址", "归属地", "威胁分级", "备注"]
     ws1.append(headers1)
     for cell in ws1[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_border
+    # 威胁分级配色（红=危险，绿=干净，本地黄底优先）
+    threat_fill = {
+        "Critical": PatternFill(start_color="C00000", end_color="C00000", fill_type="solid"),
+        "High":     PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid"),
+        "Clean":    PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
+    }
+    threat_font = {
+        "Critical": Font(bold=True, color="FFFFFF"),
+        "High":     Font(bold=True, color="FFFFFF"),
+        "Clean":    Font(color="006100"),
+    }
     for idx, ip in enumerate(external_ip_list, start=1):
         location, _, _ = location_map.get(ip, ("未知", "未知", "未知"))
         # 检查是否为本地IP
@@ -780,8 +806,16 @@ def generate_ip_report(files, date, local_geos=None):
         if local_geos_set and any(g in str(location) for g in local_geos_set):
             remark = "本地IP"
             is_local = True
-        ws1.append([idx, ip, location, remark])
-        for col in range(1, 5):
+        # 威胁分级
+        if bad_ips and ip in bad_ips:
+            _level, _hits = _threat_check_ip(ip, bad_ips, threat_sources)
+            threat_txt = f"{_level}({','.join(_hits)})" if _hits else _level
+        elif bad_ips:
+            threat_txt = "Clean"
+        else:
+            threat_txt = "未查"
+        ws1.append([idx, ip, location, threat_txt, remark])
+        for col in range(1, 6):
             ws1.cell(row=idx + 1, column=col).border = thin_border
             if is_local:
                 ws1.cell(row=idx + 1, column=col).fill = local_fill
@@ -789,10 +823,19 @@ def generate_ip_report(files, date, local_geos=None):
         ws1.cell(row=idx + 1, column=2).alignment = Alignment(horizontal="left", vertical="center")
         ws1.cell(row=idx + 1, column=3).alignment = Alignment(wrap_text=True, vertical="center")
         ws1.cell(row=idx + 1, column=4).alignment = Alignment(horizontal="center", vertical="center")
+        ws1.cell(row=idx + 1, column=5).alignment = Alignment(horizontal="center", vertical="center")
+        # 威胁分级配色（本地IP 黄底优先，覆盖分级色）
+        if not is_local:
+            _lv = threat_txt.split("(")[0]
+            if _lv in threat_fill:
+                _cell = ws1.cell(row=idx + 1, column=4)
+                _cell.fill = threat_fill[_lv]
+                _cell.font = threat_font[_lv]
     ws1.column_dimensions["A"].width = 8
     ws1.column_dimensions["B"].width = 18
     ws1.column_dimensions["C"].width = 40
-    ws1.column_dimensions["D"].width = 12
+    ws1.column_dimensions["D"].width = 22
+    ws1.column_dimensions["E"].width = 12
     ws2 = wb.create_sheet("内网IP归属")
     headers2 = ["序号", "IP地址", "归属地"]
     ws2.append(headers2)
