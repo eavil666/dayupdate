@@ -1,13 +1,13 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.0/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe"
   ],
-  "md5": "5272F891EACC2EB941B4C56CFC2BDA12",
-  "release_note": "v1.7.0（分支 refactor/b-module-split 基线）\n新功能：\n1. 威胁分级：外网IP归属分析新增\"威胁分级\"列——自动匹配 EmergingThreats/AbuseFeodo/BlocklistDE 三大公开威胁源，分级 Critical/High/Clean，命中源可视化（如 High(BlocklistDE)），名单磁盘缓存6小时，断网自动降级不阻塞\n2. 配置解放：业务IP/探针/内网区域/本地归属地全部从 Excel 自动读取，config.ini 仅剩结构参数\n3. GUI 新增\"本地归属地\"输入框（默认长春，可自定义，合并进判定）\n4. 告警趋势图：openpyxl 原生内嵌图表（威胁等级/攻击类型/24h趋势）\n工程化：\n5. 代码重构：main.py 瘦身为纯入口，拆分 common/updater/ipdb/report/gui 模块\n6. pytest 48 用例 + 覆盖率 53% 门槛；ruff + pre-commit 代码规范\n7. 日志系统升级（时间戳/级别/文件）；SSL 降级静默、config 容错\n8. release.py 分支参数化；GitHub Actions CI 双 job（Linux 测试+Windows 构建）",
+  "md5": "850342A27FD1DDE0F73564AE6DC6D31A",
+  "release_note": "v1.7.1 修复更新：\n- 外网攻击研判表\"状态\"列：已封禁 改为 已处置\n- 当日态势总览措辞同步：\"累计封禁 IP\" 改为 \"累计处置 IP\"\n（处置动作表述统一，不再局限于\"封禁\"）",
   "force_update": false
 }
