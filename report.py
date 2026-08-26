@@ -322,7 +322,7 @@ def render(
     auto_summary = (
         f"今日共捕获告警 {stats['total']} 起，其中内网 {stats['int_count']} 起"
         f"（{stats['int_count'] / total * 100:.1f}%），外网 {stats['ext_count']} 起"
-        f"（{stats['ext_count'] / total * 100:.1f}%），累计封禁 IP {stats['ban_count']} 个。"
+        f"（{stats['ext_count'] / total * 100:.1f}%），累计处置 IP {stats['ban_count']} 个。"
     )
     _add_para(doc, f"1. {auto_summary}")
     work_items = _parse_lines(work_summary)
@@ -378,7 +378,7 @@ def render(
     if len(ext) > 0:
         grp = ext.groupby("攻击名称", sort=False).agg({"威胁等级": "first", "源IP": "count"}).reset_index()
         ext_rows = [
-            (idx, row["攻击名称"], f"{int(row['源IP'])} 起", "流量特征+情报比对", "已封禁")
+            (idx, row["攻击名称"], f"{int(row['源IP'])} 起", "流量特征+情报比对", "已处置")
             for idx, (_, row) in enumerate(grp.iterrows(), start=1)
         ]
     else:
@@ -559,7 +559,7 @@ def generate_daily_report(files, date, work_summary=None, follow_items=None, int
     df = load_and_classify(files, conf)
     stats = analyze(df)
     _log(
-        f"[+] 总告警 {stats['total']} | 内网 {stats['int_count']} | 外网 {stats['ext_count']} | 封禁 {stats['ban_count']}"
+        f"[+] 总告警 {stats['total']} | 内网 {stats['int_count']} | 外网 {stats['ext_count']} | 处置 {stats['ban_count']}"
     )
     health_rows = conf["probes"]
     intel_list = load_intel(conf)
