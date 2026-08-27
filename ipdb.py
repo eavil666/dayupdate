@@ -711,6 +711,11 @@ def lookup_ip_geo(ip):
     return geo
 
 
+def _is_geo_failed(loc):
+    """归属是否查询失败：空 / 未知 / 以'查询失败'开头（含 '查询失败(index out of range)' 等带异常信息的情况）。"""
+    return (not loc) or loc == "未知" or loc.startswith("查询失败")
+
+
 def query_all_ips(ips):
     results = {}
     for ip in ips:
@@ -724,10 +729,10 @@ def query_all_ips(ips):
     if searcher:
         _log(f"使用本地 ip2region 离线库查询 {len(pending)} 个IP...")
         results.update(query_offline(searcher, pending))
-        found = sum(1 for v in results.values() if v[0] not in ("未知", "查询失败"))
+        found = sum(1 for v in results.values() if not _is_geo_failed(v[0]))
         _log(f"离线查询完成，成功 {found}/{len(pending)}")
-        # 离线未命中（查询失败/未知）的 IP 走在线补全（pconline，带 geo_cache 缓存）
-        missing = [ip for ip in pending if results.get(ip, ("", "", ""))[0] in ("未知", "查询失败")]
+        # 离线未命中（查询失败/未知/空）的 IP 走在线补全（failover 链，带 geo_cache 缓存）
+        missing = [ip for ip in pending if _is_geo_failed(results.get(ip, ("", "", ""))[0])]
         if missing:
             _log(f"离线未命中 {len(missing)} 个，在线补全...")
             for ip in missing:
