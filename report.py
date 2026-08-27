@@ -693,9 +693,14 @@ def render(
         _add_table(doc, ["序号", "网段", "命中次数", "源IP数"], [41, 121, 71, 71], _seg_rows)
     else:
         _add_para(doc, "（无外网告警）")
-    # ② 被攻击目标 Top（目的 IP 被攻击最多，含内外网）
+    # ② 被攻击目标 Top（目的 IP 被攻击最多，含内外网；排除公共 DNS）
     _add_heading(doc, "2. 被攻击目标 Top", 2)
+    _public_dns = {
+        "114.114.114.114", "223.5.5.5", "8.8.8.8", "8.8.4.4",
+        "1.1.1.1", "119.29.29.29", "180.76.76.76",
+    }
     _tgt = df[df["目的IP"].notna()].copy()
+    _tgt = _tgt[~_tgt["目的IP"].astype(str).str.strip().isin(_public_dns)]
     if len(_tgt) > 0:
         _tgt["类型"] = _tgt["目的IP"].apply(lambda x: "内网" if is_private_ip(x) else "公网")
         _tgrp = (
