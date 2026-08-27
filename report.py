@@ -644,18 +644,19 @@ def render(
             _geo = "" if _geo.lower() in ("nan", "none") else _geo[:20]
             if _dst in bad_ips:
                 _lvl = "High"
-                _judge = "疑似木马回连/挖矿，建议隔离排查"
+                _judge = "疑回连/挖矿，建议隔离"
             elif int(_row["count"]) >= 3:
                 _lvl = "观察"
-                _judge = "外联频繁，建议核查是否业务所需"
+                _judge = "外联频繁，核查业务"
             else:
                 _lvl = "观察"
                 _judge = "外联行为，业务核查"
             _ext_rows.append((_idx, _row["源IP"], _row["目的IP"], _geo, int(_row["count"]), _lvl, _judge))
+        # 列宽总 450pt（页面约 15cm 可放下）；研判列 130pt 装下 11 字中文，Geo 大多空给窄
         _add_table(
             doc,
             ["序号", "内网主机", "外联目的IP", "目的归属", "次数", "威胁分级", "研判"],
-            [41, 101, 121, 105, 41, 71, 161],
+            [25, 80, 95, 45, 30, 45, 130],
             _ext_rows,
         )
     else:
