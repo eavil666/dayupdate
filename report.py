@@ -662,7 +662,9 @@ def render(
                 _lvl = "观察"
             else:
                 _lvl = "观察"
-            _ext_rows.append((len(_ext_rows) + 1, _row["源IP"], _row["目的IP"], _geo, int(_row["count"]), _lvl, "已处置"))
+            _ext_rows.append(
+                (len(_ext_rows) + 1, _row["源IP"], _row["目的IP"], _geo, int(_row["count"]), _lvl, "已处置")
+            )
         # 列宽总 450pt（页面约 15cm 可放下）；研判列 130pt 装下 11 字中文，Geo 大多空给窄
         _add_table(
             doc,
@@ -700,7 +702,7 @@ def render(
             conclusion = (
                 f"研判结论：今日外网攻击以「{att_name}」为主（{att_n} 起），"
                 f"其中 {hit_n} 个源 IP 命中公开威胁名单（多为境外 VPS 扫描源），"
-                f"建议对上述源实施临时封禁并持续监控；内网侧未发现失陷迹象。"
+                f"已在防火墙实施封禁并持续监控；内网侧未发现失陷迹象。"
             )
         else:
             conclusion = (
@@ -745,7 +747,15 @@ def render(
     follow_parsed = _parse_lines(follow_items, skip_example=False)
     _add_numbered_list(doc, follow_parsed if follow_parsed else default_items)
 
-    doc.save(out_path)
+    try:
+        doc.save(out_path)
+    except PermissionError:
+        # 文件被占用（WPS/Word 打开中），使用带时间戳的备用文件名
+        _alt = str(out_path).replace(".docx", f"-{datetime.now().strftime('%H%M%S')}.docx")
+        doc.save(_alt)
+        _log(f"[!] 原文件被占用（WPS/Word打开），已保存为: {_alt}")
+        return _alt
+    return out_path
 
 
 def load_intel(conf):
@@ -870,7 +880,7 @@ def generate_daily_report(files, date, work_summary=None, follow_items=None, int
     out_dir = Path(runtime_dir) / conf["out_dir"]
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / f"值守保障日报{date}.docx"
-    render(
+    saved = render(
         conf,
         df,
         stats,
@@ -883,5 +893,5 @@ def generate_daily_report(files, date, work_summary=None, follow_items=None, int
         intel_items,
         threat_data,
     )
-    _log(f"[✓] 值守日报已生成: {out_path}")
-    return out_path
+    _log(f"[✓] 值守日报已生成: {saved}")
+    return saved
