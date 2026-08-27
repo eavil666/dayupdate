@@ -675,8 +675,57 @@ def render(
     else:
         _add_para(doc, "今日无内网外联行为。")
 
-    # 七、重点事件研判
-    _add_heading(doc, "七、重点事件研判", 1)
+    # 七、攻击面聚焦（攻击源网段 / 被攻击目标 / 情报IOC）
+    _add_heading(doc, "七、攻击面聚焦", 1)
+    # ① 攻击源 /24 网段聚合（呼应周报"哪些 IP 段在扫"）
+    _add_heading(doc, "1. 攻击源网段聚焦（/24）", 2)
+    if len(ext) > 0:
+        _ext2 = ext.copy()
+        _ext2["网段"] = _ext2["源IP"].astype(str).apply(lambda x: ".".join(str(x).split(".")[:3]) + ".x")
+        _seg = (
+            _ext2.groupby("网段")
+            .agg(命中=("源IP", "size"), 源数=("源IP", "nunique"))
+            .reset_index()
+            .sort_values("命中", ascending=False)
+            .head(8)
+        )
+        _seg_rows = [(i, r["网段"], int(r["命中"]), int(r["源数"])) for i, (_, r) in enumerate(_seg.iterrows(), 1)]
+        _add_table(doc, ["序号", "网段", "命中次数", "源IP数"], [41, 121, 71, 71], _seg_rows)
+    else:
+        _add_para(doc, "（无外网告警）")
+    # ② 被攻击目标 Top（目的 IP 被攻击最多，含内外网）
+    _add_heading(doc, "2. 被攻击目标 Top", 2)
+    _tgt = df[df["目的IP"].notna()].copy()
+    if len(_tgt) > 0:
+        _tgt["类型"] = _tgt["目的IP"].apply(lambda x: "内网" if is_private_ip(x) else "公网")
+        _tgrp = (
+            _tgt.groupby(["目的IP", "类型"])
+            .agg(次数=("目的IP", "size"))
+            .reset_index()
+            .sort_values("次数", ascending=False)
+            .head(8)
+        )
+        _tgt_rows = [(i, r["目的IP"], r["类型"], int(r["次数"])) for i, (_, r) in enumerate(_tgrp.iterrows(), 1)]
+        _add_table(doc, ["序号", "目标IP", "类型", "被攻击次数"], [41, 121, 71, 91], _tgt_rows)
+    else:
+        _add_para(doc, "（无目的IP数据）")
+    # ③ 情报IOC命中（告警"情报IOC"列有值的，情报平台实锤）
+    _add_heading(doc, "3. 情报IOC命中", 2)
+    _ioc = df[df["情报IOC"].notna()].copy()
+    if len(_ioc) > 0:
+        _ioc = _ioc[_ioc["情报IOC"].astype(str).str.strip() != ""]
+    if len(_ioc) > 0:
+        _ioc = _ioc[["源IP", "目的IP", "攻击名称", "情报IOC"]].head(8)
+        _ioc_rows = [
+            (i, r["源IP"], r["目的IP"], r["攻击名称"], str(r["情报IOC"])[:30])
+            for i, (_, r) in enumerate(_ioc.iterrows(), 1)
+        ]
+        _add_table(doc, ["序号", "源IP", "目标IP", "攻击名称", "IOC"], [41, 111, 111, 121, 71], _ioc_rows)
+    else:
+        _add_para(doc, "（今日无情报IOC命中告警）")
+
+    # 八、重点事件研判
+    _add_heading(doc, "八、重点事件研判", 1)
     key = df[df["威胁等级"].isin(conf["crit_levels"])].copy()
     if len(key) > 0:
         key["_p"] = key["威胁等级"].map({lv: i for i, lv in enumerate(LEVELS)})
@@ -711,8 +760,8 @@ def render(
             )
         _add_para(doc, conclusion)
 
-    # 八、情报动态
-    _add_heading(doc, "八、情报动态", 1)
+    # 九、情报动态
+    _add_heading(doc, "九、情报动态", 1)
     _add_para(doc, "当日需关注的新增 CVE / 行业预警：")
     intel_parsed = _parse_lines(intel_items, skip_example=False)
     if intel_parsed:
@@ -736,8 +785,8 @@ def render(
     else:
         _add_para(doc, "（暂无新增情报，详见威胁情报平台）")
 
-    # 九、待跟进事项
-    _add_heading(doc, "九、待跟进事项", 1)
+    # 十、待跟进事项
+    _add_heading(doc, "十、待跟进事项", 1)
     default_items = [
         "内网高危告警溯源与处置闭环",
         "外网封禁 IP 清单同步至边界防火墙",
