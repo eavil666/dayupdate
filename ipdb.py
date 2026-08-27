@@ -596,7 +596,7 @@ def _pconline_geo(ip):
         url = f"https://whois.pconline.com.cn/ipJson.jsp?ip={ip}&json=true"
         resp = requests.get(
             url,
-            timeout=10,
+            timeout=8,
             verify=False,
             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.pconline.com.cn/"},
         )
@@ -615,6 +615,57 @@ def _pconline_geo(ip):
         return prov
     except Exception:
         return ""
+
+
+def _baidu_geo(ip):
+    """百度 opendata 归属查询（国内免 Key），失败返回 ''。"""
+    try:
+        import requests
+
+        url = f"http://opendata.baidu.com/api.php?query={ip}&co=&resource_id=6006&ie=utf8&oe=utf8"
+        resp = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        data = resp.json()
+        lst = data.get("data") or []
+        if lst and lst[0].get("location"):
+            return str(lst[0]["location"]).strip()
+        return ""
+    except Exception:
+        return ""
+
+
+def _ipwhois_geo(ip):
+    """ipwho.is 归属查询（境外服务，国内可达，结构完整），失败返回 ''。"""
+    try:
+        import requests
+
+        resp = requests.get(f"https://ipwho.is/{ip}", timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        data = resp.json()
+        if not data.get("success"):
+            return ""
+        parts = []
+        for key in ("country", "region", "city"):
+            val = (data.get(key) or "").strip()
+            if val and val != "-":
+                parts.append(val)
+        return " ".join(parts) if parts else ""
+    except Exception:
+        return ""
+
+
+# 在线归属查询 failover 链：一个失败自动切下一个（全部失败返回 ''）
+_GEO_PROVIDERS = (_pconline_geo, _baidu_geo, _ipwhois_geo)
+
+
+def _geo_online_failover(ip):
+    """多源在线归属查询（pconline -> 百度 -> ipwho.is），首个非空即返回。"""
+    for provider in _GEO_PROVIDERS:
+        try:
+            geo = provider(ip)
+        except Exception:
+            geo = ""
+        if geo:
+            return geo
+    return ""
 
 
 def lookup_ip_geo(ip):
@@ -652,9 +703,9 @@ def lookup_ip_geo(ip):
                     geo = _parts[0]
         except Exception:
             geo = ""
-    # 2) 在线补全（离线未命中；失败静默）
+    # 2) 在线补全（离线未命中；failover 链：pconline -> 百度 -> ipwho.is，失败静默）
     if not geo:
-        geo = _pconline_geo(ip)
+        geo = _geo_online_failover(ip)
     _geo_cache[ip] = geo
     _geo_save_cache()
     return geo
