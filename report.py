@@ -719,13 +719,32 @@ def render(
     _ioc = df[df["情报IOC"].notna()].copy()
     if len(_ioc) > 0:
         _ioc = _ioc[_ioc["情报IOC"].astype(str).str.strip() != ""]
+    # 不排除 DNS 目的（内网主机经 DNS 解析恶意域名仍属情报命中），
+    # 但不展示目标 IP（多为 DNS 干扰），聚焦"源 IP + IOC"去重聚合
     if len(_ioc) > 0:
-        _ioc = _ioc[["源IP", "目的IP", "攻击名称", "情报IOC"]].head(8)
+        _ioc_grp = (
+            _ioc.groupby(["源IP", "攻击名称", "情报IOC"])
+            .size()
+            .reset_index(name="次数")
+            .sort_values("次数", ascending=False)
+            .head(8)
+        )
         _ioc_rows = [
-            (i, r["源IP"], r["目的IP"], r["攻击名称"], str(r["情报IOC"])[:30])
-            for i, (_, r) in enumerate(_ioc.iterrows(), 1)
+            (
+                i,
+                r["源IP"],
+                str(r["攻击名称"])[:18],
+                str(r["情报IOC"])[:30],
+                int(r["次数"]),
+            )
+            for i, (_, r) in enumerate(_ioc_grp.iterrows(), 1)
         ]
-        _add_table(doc, ["序号", "源IP", "目标IP", "攻击名称", "IOC"], [41, 111, 111, 121, 71], _ioc_rows)
+        _add_table(
+            doc,
+            ["序号", "源IP(内网主机)", "攻击名称", "恶意域名(IOC)", "命中次数"],
+            [41, 111, 121, 131, 71],
+            _ioc_rows,
+        )
     else:
         _add_para(doc, "（今日无情报IOC命中告警）")
 
