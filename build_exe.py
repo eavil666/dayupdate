@@ -214,6 +214,7 @@ a = Analysis(
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox', 'tkinter.filedialog',
         'tkinter.font',
         'common', 'updater', 'ipdb', 'report', 'gui', 'threat_check',
+        'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
     ],
     hookspath=[],
     hooksconfig={{}},

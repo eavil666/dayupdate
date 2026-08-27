@@ -11,6 +11,7 @@ dependencies = [
     "requests",
     "certifi",
     "py-ip2region",
+    "Pillow",
 ]
 
 [tool.pytest.ini_options]

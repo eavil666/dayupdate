@@ -9,6 +9,7 @@
 import ipaddress
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -278,8 +279,159 @@ def _fit_table(table, widths=None):
             trPr.append(cant_split)
 
 
+def _render_level_chart(stats, save_path):
+    """用 PIL 手绘威胁等级柱状图（内网/外网对比），失败返回 None。
+
+    不引入 matplotlib（exe 体积膨胀），PIL 画简单柱状图足够日报使用。
+    中文字体优先微软雅黑/黑体/宋体，找不到则用默认字体（中文可能方块，但不崩）。
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        levels = list(LEVELS)  # 严重/高危/中危/低危
+        int_vals = [stats["int_level"].get(lv, 0) for lv in levels]
+        ext_vals = [stats["ext_level"].get(lv, 0) for lv in levels]
+
+        W, H = 660, 360
+        margin_l, margin_r, margin_t, margin_b = 70, 20, 50, 60
+        plot_w, plot_h = W - margin_l - margin_r, H - margin_t - margin_b
+
+        img = Image.new("RGB", (W, H), "white")
+        d = ImageDraw.Draw(img)
+
+        font_path = None
+        for fp in (
+            r"C:\Windows\Fonts\msyh.ttc",
+            r"C:\Windows\Fonts\simhei.ttf",
+            r"C:\Windows\Fonts\simsun.ttc",
+        ):
+            if os.path.exists(fp):
+                font_path = fp
+                break
+        try:
+            f_title = ImageFont.truetype(font_path, 16) if font_path else ImageFont.load_default()
+            f_label = ImageFont.truetype(font_path, 12) if font_path else ImageFont.load_default()
+            f_axis = ImageFont.truetype(font_path, 10) if font_path else ImageFont.load_default()
+        except Exception:
+            f_title = f_label = f_axis = ImageFont.load_default()
+
+        # 标题
+        d.text((W // 2, 18), "威胁等级分布（内网 / 外网）", font=f_title, fill="black", anchor="mm")
+
+        # 坐标轴
+        d.line([(margin_l, margin_t), (margin_l, H - margin_b)], fill="black", width=1)
+        d.line([(margin_l, H - margin_b), (W - margin_r, H - margin_b)], fill="black", width=1)
+
+        max_val = max(max(int_vals), max(ext_vals), 1)
+        n = len(levels)
+        group_w = plot_w / n
+        bar_w = min(22, group_w * 0.28)
+
+        for i, lv in enumerate(levels):
+            cx = margin_l + group_w * i + group_w / 2
+            # 内网柱（蓝）
+            iv = int_vals[i]
+            ih = plot_h * iv / max_val
+            d.rectangle(
+                [cx - bar_w - 2, H - margin_b - ih, cx - 2, H - margin_b],
+                fill="#4472C4",
+            )
+            if iv > 0:
+                d.text((cx - bar_w / 2 - 2, H - margin_b - ih - 14), str(iv), font=f_axis, fill="#4472C4", anchor="mm")
+            # 外网柱（红）
+            ev = ext_vals[i]
+            eh = plot_h * ev / max_val
+            d.rectangle(
+                [cx + 2, H - margin_b - eh, cx + bar_w + 2, H - margin_b],
+                fill="#C00000",
+            )
+            if ev > 0:
+                d.text((cx + bar_w / 2 + 2, H - margin_b - eh - 14), str(ev), font=f_axis, fill="#C00000", anchor="mm")
+            # 类别标签
+            d.text((cx, H - margin_b + 14), lv, font=f_label, fill="black", anchor="mm")
+
+        # 图例
+        d.rectangle([margin_l, 30, margin_l + 14, 44], fill="#4472C4")
+        d.text((margin_l + 18, 37), "内网", font=f_axis, fill="black", anchor="lm")
+        d.rectangle([margin_l + 60, 30, margin_l + 74, 44], fill="#C00000")
+        d.text((margin_l + 78, 37), "外网", font=f_axis, fill="black", anchor="lm")
+
+        img.save(save_path)
+        return save_path
+    except Exception:
+        return None
+
+
+def _render_attack_chart(ext_df, save_path):
+    """PIL 手绘外网攻击类型 Top 横向条形图（名称长，横条更清晰），失败返回 None。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        counts = ext_df["攻击名称"].value_counts().head(8)
+        if len(counts) == 0:
+            return None
+        items = [(str(k), int(v)) for k, v in counts.items()]
+
+        W, H = 660, 60 + len(items) * 34
+        margin_l, margin_r, margin_t, margin_b = 220, 60, 40, 24
+        plot_w = W - margin_l - margin_r
+        bar_h = 20
+        row_h = 34
+
+        img = Image.new("RGB", (W, H), "white")
+        d = ImageDraw.Draw(img)
+
+        font_path = None
+        for fp in (
+            r"C:\Windows\Fonts\msyh.ttc",
+            r"C:\Windows\Fonts\simhei.ttf",
+            r"C:\Windows\Fonts\simsun.ttc",
+        ):
+            if os.path.exists(fp):
+                font_path = fp
+                break
+        try:
+            f_title = ImageFont.truetype(font_path, 16) if font_path else ImageFont.load_default()
+            f_label = ImageFont.truetype(font_path, 11) if font_path else ImageFont.load_default()
+            f_axis = ImageFont.truetype(font_path, 10) if font_path else ImageFont.load_default()
+        except Exception:
+            f_title = f_label = f_axis = ImageFont.load_default()
+
+        d.text((W // 2, 18), "外网攻击类型分布 TOP8", font=f_title, fill="black", anchor="mm")
+
+        max_val = max(v for _, v in items)
+        # 坐标轴
+        d.line([(margin_l, margin_t), (margin_l, H - margin_b)], fill="black", width=1)
+        d.line([(margin_l, H - margin_b), (W - margin_r, H - margin_b)], fill="black", width=1)
+
+        for i, (name, v) in enumerate(items):
+            y = margin_t + i * row_h
+            bw = plot_w * v / max_val
+            d.rectangle([margin_l, y, margin_l + bw, y + bar_h], fill="#C00000")
+            if v > 0:
+                d.text((margin_l + bw + 6, y + bar_h / 2), str(v), font=f_axis, fill="#C00000", anchor="lm")
+            # 名称（右侧截断，避免超宽）
+            label = name if len(name) <= 16 else name[:15] + "…"
+            d.text((margin_l - 8, y + bar_h / 2), label, font=f_label, fill="black", anchor="rm")
+
+        img.save(save_path)
+        return save_path
+    except Exception:
+        return None
+
+
 def render(
-    conf, df, stats, health_rows, intel_list, date, out_path, work_summary=None, follow_items=None, intel_items=None
+    conf,
+    df,
+    stats,
+    health_rows,
+    intel_list,
+    date,
+    out_path,
+    work_summary=None,
+    follow_items=None,
+    intel_items=None,
+    threat_data=None,
 ):
     import docx
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -336,6 +488,14 @@ def render(
         [110, 111, 110, 111],
         [(lv, stats["int_level"].get(lv, 0), lv, stats["ext_level"].get(lv, 0)) for lv in LEVELS],
     )
+    # 威胁等级柱状图（PIL 手绘，失败静默跳过）
+    _chart_path = _render_level_chart(stats, os.path.join(tempfile.gettempdir(), f"report_chart_{date}.png"))
+    if _chart_path:
+        try:
+            doc.add_picture(_chart_path, width=docx.shared.Cm(15))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        except Exception:
+            pass
     for idx, (title, body) in enumerate(
         [
             ("可疑域名解析请求分析", "通过定期对应用进行安全事件监测，暂未发现可疑域名解析请求事件。"),
@@ -375,15 +535,39 @@ def render(
     # 五、外网攻击研判与处置
     _add_heading(doc, "五、外网攻击研判与处置", 1)
     ext = stats["external"]
+    bad_ips, threat_sources = threat_data if threat_data else (set(), {})
+    threat_hits = []  # 命中公开威胁名单的源 IP（用于处置建议）
     if len(ext) > 0:
         grp = ext.groupby("攻击名称", sort=False).agg({"威胁等级": "first", "源IP": "count"}).reset_index()
-        ext_rows = [
-            (idx, row["攻击名称"], f"{int(row['源IP'])} 起", "流量特征+情报比对", "已处置")
-            for idx, (_, row) in enumerate(grp.iterrows(), start=1)
-        ]
+        ext_rows = []
+        for idx, (_, row) in enumerate(grp.iterrows(), start=1):
+            # 该攻击类型下的源 IP 集合
+            type_ips = ext.loc[ext["攻击名称"] == row["攻击名称"], "源IP"].dropna().astype(str).tolist()
+            hit_ips = [ip for ip in type_ips if ip in bad_ips]
+            threat_txt = f"High×{len(hit_ips)}" if hit_ips else "—"
+            ext_rows.append((idx, row["攻击名称"], f"{int(row['源IP'])} 起", threat_txt, "流量特征+情报比对", "已处置"))
+        # 全部外网源 IP 中命中威胁名单的（去重）
+        all_ext_ips = ext["源IP"].dropna().astype(str).unique().tolist()
+        for ip in all_ext_ips:
+            if ip in bad_ips:
+                hits = threat_sources.get(ip, [])
+                threat_hits.append((ip, ",".join(hits)))
     else:
-        ext_rows = [("（无外网告警）", "", "", "", "")]
-    _add_table(doc, ["序号", "威胁类型", "命中次数", "研判依据", "状态"], [41, 203, 51, 106, 41], ext_rows)
+        ext_rows = [("（无外网告警）", "", "", "", "", "")]
+    _add_table(
+        doc,
+        ["序号", "威胁类型", "命中次数", "威胁源分级", "研判依据", "状态"],
+        [41, 173, 51, 71, 106, 41],
+        ext_rows,
+    )
+    # 攻击类型分布图（PIL 横向条形图，失败静默跳过）
+    _attack_chart = _render_attack_chart(ext, os.path.join(tempfile.gettempdir(), f"attack_chart_{date}.png"))
+    if _attack_chart:
+        try:
+            doc.add_picture(_attack_chart, width=docx.shared.Cm(15))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        except Exception:
+            pass
 
     # 六、内网异常研判与处置
     _add_heading(doc, "六、内网异常研判与处置", 1)
@@ -395,12 +579,19 @@ def render(
         grp = intdf.groupby("攻击名称", sort=False).agg(agg_map).reset_index()
         int_rows = []
         for idx, (_, row) in enumerate(grp.iterrows(), start=1):
-            lvl = row.get("威胁等级", "") if "威胁等级" in row else ""
-            status = "取证/核查" if lvl in conf["crit_levels"] else "观察"
-            int_rows.append((idx, row["攻击名称"], f"{int(row['源IP'])} 起", "流量特征+情报比对", status))
+            # 该攻击类型下的源 IP 集合（威胁名单匹配，口径与内网一致）
+            type_ips = intdf.loc[intdf["攻击名称"] == row["攻击名称"], "源IP"].dropna().astype(str).tolist()
+            hit_ips = [ip for ip in type_ips if ip in bad_ips]
+            threat_txt = f"High×{len(hit_ips)}" if hit_ips else "—"
+            int_rows.append((idx, row["攻击名称"], f"{int(row['源IP'])} 起", threat_txt, "流量特征+情报比对", "已处置"))
     else:
-        int_rows = [("（无内网告警）", "", "", "", "")]
-    _add_table(doc, ["序号", "威胁类型", "命中次数", "研判依据", "状态"], [41, 203, 51, 106, 41], int_rows)
+        int_rows = [("（无内网告警）", "", "", "", "", "")]
+    _add_table(
+        doc,
+        ["序号", "威胁类型", "命中次数", "威胁源分级", "研判依据", "状态"],
+        [41, 173, 51, 71, 106, 41],
+        int_rows,
+    )
 
     # 七、重点事件研判
     _add_heading(doc, "七、重点事件研判", 1)
@@ -419,6 +610,24 @@ def render(
         _add_table(doc, ["序号", "事件名称", "源地址", "攻击次数"], [41, 145, 135, 121], key_rows)
     else:
         _add_para(doc, "今日无严重/高危级事件。")
+    # 自动研判结论（结合威胁分级）
+    if len(ext) > 0:
+        top_att = ext["攻击名称"].value_counts().head(1)
+        att_name = top_att.index[0] if len(top_att) else ""
+        att_n = int(top_att.iloc[0]) if len(top_att) else 0
+        hit_n = len(threat_hits)
+        if hit_n:
+            conclusion = (
+                f"研判结论：今日外网攻击以「{att_name}」为主（{att_n} 起），"
+                f"其中 {hit_n} 个源 IP 命中公开威胁名单（多为境外 VPS 扫描源），"
+                f"建议对上述源实施临时封禁并持续监控；内网侧未发现失陷迹象。"
+            )
+        else:
+            conclusion = (
+                f"研判结论：今日外网攻击以「{att_name}」为主（{att_n} 起），"
+                f"源 IP 均未命中公开威胁名单，判定为常规扫描探测，已按流程处置，持续观察。"
+            )
+        _add_para(doc, conclusion)
 
     # 八、情报动态
     _add_heading(doc, "八、情报动态", 1)
@@ -561,12 +770,38 @@ def generate_daily_report(files, date, work_summary=None, follow_items=None, int
     _log(
         f"[+] 总告警 {stats['total']} | 内网 {stats['int_count']} | 外网 {stats['ext_count']} | 处置 {stats['ban_count']}"
     )
+    # 威胁名单（threat_check：磁盘缓存 6h，失败降级空集，不阻塞日报）
+    threat_data = (set(), {})
+    try:
+        from threat_check import load_bad_ips
+
+        _cache_file = Path(runtime_dir) / "threat_feeds_cache.json"
+        bad_ips, sources = load_bad_ips(str(_cache_file))
+        if bad_ips:
+            threat_data = (bad_ips, sources)
+            _log(f"[+] 威胁名单加载: {len(bad_ips)} 条（用于外网研判分级）")
+        else:
+            _log("[!] 威胁名单为空，外网研判表威胁源分级显示 —")
+    except Exception as _e:
+        _log(f"[!] 威胁名单加载失败: {_e}")
     health_rows = conf["probes"]
     intel_list = load_intel(conf)
     # 使用 runtime_dir（脚本/exe所在目录）作为输出基础目录
     out_dir = Path(runtime_dir) / conf["out_dir"]
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / f"值守保障日报{date}.docx"
-    render(conf, df, stats, health_rows, intel_list, date, str(out_path), work_summary, follow_items, intel_items)
+    render(
+        conf,
+        df,
+        stats,
+        health_rows,
+        intel_list,
+        date,
+        str(out_path),
+        work_summary,
+        follow_items,
+        intel_items,
+        threat_data,
+    )
     _log(f"[✓] 值守日报已生成: {out_path}")
     return out_path
