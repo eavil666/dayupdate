@@ -279,6 +279,38 @@ def _fit_table(table, widths=None):
             trPr.append(cant_split)
 
 
+# 本地 ip2region 离线库归属查询（lazy 加载，供"目的归属"等列使用）
+_geo_searcher = None
+
+
+def _lookup_geo(ip):
+    """查询 IP 归属（ip2region 本地库）：返回 '省份 城市' 或国家，失败返回 ''。"""
+    global _geo_searcher
+    if _geo_searcher is None:
+        try:
+            import ip2region.searcher as _xdb
+            import ip2region.util as _util
+
+            _xdb_path = os.path.join(runtime_dir, "ip2region_v4.xdb")
+            if not os.path.exists(_xdb_path):
+                return ""
+            _geo_searcher = _xdb.new_with_file_only(_util.IPv4, _xdb_path)
+        except Exception:
+            return ""
+    try:
+        _raw = _geo_searcher.search(str(ip).strip())
+        _parts = _raw.split("|") if _raw else []
+        if len(_parts) >= 5:
+            _prov, _city = _parts[2], _parts[3]
+            if _prov and _prov != "0" and _city and _city != "0":
+                return f"{_prov} {_city}"
+            if _parts[0] and _parts[0] != "0":
+                return _parts[0]
+        return ""
+    except Exception:
+        return ""
+
+
 def _render_level_chart(stats, save_path):
     """用 PIL 手绘威胁等级柱状图（内网/外网对比），失败返回 None。
 
@@ -640,7 +672,7 @@ def render(
         _ext_rows = []
         for _idx, (_, _row) in enumerate(_grp.iterrows(), start=1):
             _dst = str(_row["目的IP"]).strip()
-            _geo = str(_row["geo"]) if _row["geo"] is not None else ""
+            _geo = _lookup_geo(_dst) or (str(_row["geo"]) if _row["geo"] is not None else "")
             _geo = "" if _geo.lower() in ("nan", "none") else _geo[:20]
             if _dst in bad_ips:
                 _lvl = "High"
