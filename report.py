@@ -7,7 +7,6 @@
 """
 
 import ipaddress
-import json
 import os
 import re
 import tempfile
@@ -280,101 +279,13 @@ def _fit_table(table, widths=None):
             trPr.append(cant_split)
 
 
-# 本地 ip2region 离线库归属查询（lazy 加载，供"目的归属"等列使用）
-_geo_searcher = None
-_geo_cache = None
-_geo_cache_path = None
-
-
-def _geo_load_cache():
-    """加载磁盘归属缓存（geo_cache.json），避免每天重复在线查询。"""
-    global _geo_cache, _geo_cache_path
-    if _geo_cache is None:
-        _geo_cache_path = os.path.join(runtime_dir, "geo_cache.json")
-        try:
-            with open(_geo_cache_path, encoding="utf-8") as f:
-                _geo_cache = json.load(f)
-        except Exception:
-            _geo_cache = {}
-
-
-def _geo_save_cache():
-    try:
-        with open(_geo_cache_path, "w", encoding="utf-8") as f:
-            json.dump(_geo_cache, f, ensure_ascii=False)
-    except Exception:
-        pass
-
-
 def _lookup_geo(ip):
-    """查询 IP 归属：磁盘缓存 -> ip2region 离线库 -> 在线 API 补全（ip-api.com）。
-
-    返回 '省份 城市' 或国家；全部失败返回 ''。在线查询结果写入磁盘缓存，避免每日重复请求。
+    """IP 归属查询（薄封装）：委托 ipdb.lookup_ip_geo 三级链路
+    （geo_cache.json -> ip2region 离线 -> pconline 在线补全），IP 归属表与日报共用。
     """
-    global _geo_searcher
-    _ip = str(ip).strip()
-    _geo_load_cache()
-    if _ip in _geo_cache:
-        return _geo_cache[_ip]
+    from ipdb import lookup_ip_geo
 
-    # 1) 离线库
-    _geo = ""
-    if _geo_searcher is None:
-        try:
-            import ip2region.searcher as _xdb
-            import ip2region.util as _util
-
-            _xdb_path = os.path.join(runtime_dir, "ip2region_v4.xdb")
-            if os.path.exists(_xdb_path):
-                _geo_searcher = _xdb.new_with_file_only(_util.IPv4, _xdb_path)
-        except Exception:
-            _geo_searcher = None
-    if _geo_searcher is not None:
-        try:
-            _raw = _geo_searcher.search(_ip)
-            _parts = _raw.split("|") if _raw else []
-            if len(_parts) >= 5:
-                _prov, _city = _parts[2], _parts[3]
-                if _prov and _prov != "0" and _city and _city != "0":
-                    _geo = f"{_prov} {_city}"
-                elif _parts[0] and _parts[0] != "0":
-                    _geo = _parts[0]
-        except Exception:
-            _geo = ""
-
-    # 2) 在线补全（离线未命中时；pconline 太平洋网络，国内可达；失败静默，不阻塞日报）
-    if not _geo:
-        try:
-            import warnings as _w
-
-            import requests
-
-            _w.filterwarnings("ignore")
-            _url = f"https://whois.pconline.com.cn/ipJson.jsp?ip={_ip}&json=true"
-            _r = requests.get(
-                _url, timeout=10, verify=False,
-                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.pconline.com.cn/"},
-            )
-            _raw = _r.content
-            try:
-                _data = json.loads(_raw.decode("utf-8"))
-            except Exception:
-                _data = json.loads(_raw.decode("gbk", errors="replace"))
-            _addr = str(_data.get("addr") or "").strip()
-            _prov = str(_data.get("pro") or "").strip()
-            _city = str(_data.get("city") or "").strip()
-            if _addr and _addr not in ("查询失败", "未知"):
-                _geo = _addr
-            elif _prov and _city:
-                _geo = f"{_prov} {_city}"
-            elif _prov:
-                _geo = _prov
-        except Exception:
-            _geo = ""
-
-    _geo_cache[_ip] = _geo
-    _geo_save_cache()
-    return _geo
+    return lookup_ip_geo(ip)
 
 
 def _render_level_chart(stats, save_path):

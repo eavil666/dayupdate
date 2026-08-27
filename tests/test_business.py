@@ -264,16 +264,14 @@ def test_query_all_ips_offline(tmp_path, monkeypatch):
 
 
 def test_query_all_ips_online(tmp_path, monkeypatch):
-    """query_all_ips：在线 API 路径（mock batch）"""
+    """query_all_ips：在线补全路径（mock lookup_ip_geo，即 pconline 链路）"""
     import ipdb
 
     monkeypatch.setattr(ipdb, "get_offline_searcher", lambda: None)
     monkeypatch.setattr(
         ipdb,
-        "query_online_batch",
-        lambda ips: {
-            "8.8.8.8": "中国 吉林省 长春市",
-        },
+        "lookup_ip_geo",
+        lambda ip: {"8.8.8.8": "中国 吉林省 长春市"}.get(ip, ""),
     )
     results = ipdb.query_all_ips(["8.8.8.8", "10.0.0.1"])
     assert "中国" in results["8.8.8.8"][0]

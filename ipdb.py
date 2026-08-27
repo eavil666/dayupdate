@@ -9,6 +9,7 @@ load_terminal_ip_table），放此处可保证 report→ipdb 单向依赖、无�
 
 import configparser
 import ipaddress
+import json
 import os
 import sys
 import time
@@ -559,6 +560,106 @@ def query_online_batch(ips):
     return results
 
 
+# ---- 归属查询公共链路：geo_cache.json -> ip2region 离线 -> pconline 在线补全 ----
+_geo_cache = None
+_geo_cache_path = None
+_geo_searcher = None
+
+
+def _geo_load_cache():
+    global _geo_cache, _geo_cache_path
+    if _geo_cache is None:
+        _geo_cache_path = os.path.join(runtime_dir, "geo_cache.json")
+        try:
+            with open(_geo_cache_path, encoding="utf-8") as f:
+                _geo_cache = json.load(f)
+        except Exception:
+            _geo_cache = {}
+
+
+def _geo_save_cache():
+    try:
+        with open(_geo_cache_path, "w", encoding="utf-8") as f:
+            json.dump(_geo_cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _pconline_geo(ip):
+    """pconline（太平洋网络）在线归属查询，国内可达；失败返回 ''。"""
+    try:
+        import warnings as _w
+
+        import requests
+
+        _w.filterwarnings("ignore")
+        url = f"https://whois.pconline.com.cn/ipJson.jsp?ip={ip}&json=true"
+        resp = requests.get(
+            url,
+            timeout=10,
+            verify=False,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.pconline.com.cn/"},
+        )
+        raw = resp.content
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except Exception:
+            data = json.loads(raw.decode("gbk", errors="replace"))
+        addr = str(data.get("addr") or "").strip()
+        prov = str(data.get("pro") or "").strip()
+        city = str(data.get("city") or "").strip()
+        if addr and addr not in ("查询失败", "未知"):
+            return addr
+        if prov and city:
+            return f"{prov} {city}"
+        return prov
+    except Exception:
+        return ""
+
+
+def lookup_ip_geo(ip):
+    """三级归属查询：磁盘缓存 -> ip2region 离线库 -> pconline 在线补全。
+
+    返回 '省份 城市' 或国家/ISP；全部失败返回 ''。结果写盘 geo_cache.json（避免每日重复请求）。
+    供 IP 归属表（query_all_ips）与日报（report._lookup_geo）共用。
+    """
+    global _geo_searcher
+    ip = str(ip).strip()
+    _geo_load_cache()
+    if ip in _geo_cache:
+        return _geo_cache[ip]
+    # 1) 离线库
+    geo = ""
+    if _geo_searcher is None:
+        try:
+            import ip2region.searcher as _xdb
+            import ip2region.util as _util
+
+            _xdb_path = os.path.join(runtime_dir, "ip2region_v4.xdb")
+            if os.path.exists(_xdb_path):
+                _geo_searcher = _xdb.new_with_file_only(_util.IPv4, _xdb_path)
+        except Exception:
+            _geo_searcher = None
+    if _geo_searcher is not None:
+        try:
+            _raw = _geo_searcher.search(ip)
+            _parts = _raw.split("|") if _raw else []
+            if len(_parts) >= 5:
+                _prov, _city = _parts[2], _parts[3]
+                if _prov and _prov != "0" and _city and _city != "0":
+                    geo = f"{_prov} {_city}"
+                elif _parts[0] and _parts[0] != "0":
+                    geo = _parts[0]
+        except Exception:
+            geo = ""
+    # 2) 在线补全（离线未命中；失败静默）
+    if not geo:
+        geo = _pconline_geo(ip)
+    _geo_cache[ip] = geo
+    _geo_save_cache()
+    return geo
+
+
 def query_all_ips(ips):
     results = {}
     for ip in ips:
@@ -574,15 +675,25 @@ def query_all_ips(ips):
         results.update(query_offline(searcher, pending))
         found = sum(1 for v in results.values() if v[0] not in ("未知", "查询失败"))
         _log(f"离线查询完成，成功 {found}/{len(pending)}")
+        # 离线未命中（查询失败/未知）的 IP 走在线补全（pconline，带 geo_cache 缓存）
+        missing = [ip for ip in pending if results.get(ip, ("", "", ""))[0] in ("未知", "查询失败")]
+        if missing:
+            _log(f"离线未命中 {len(missing)} 个，在线补全...")
+            for ip in missing:
+                loc = lookup_ip_geo(ip)
+                if loc:
+                    parts = loc.split()
+                    stat_province = parts[1] if len(parts) >= 2 and parts[0] == "中国" else parts[0] if parts else "未知"
+                    stat_city = parts[2] if len(parts) >= 3 else stat_province
+                    results[ip] = (loc, stat_province, stat_city)
         return results
-    _log(f"使用在线 API 批量查询 {len(pending)} 个IP...")
-    online = query_online_batch(pending)
+    _log(f"使用在线 API 补全 {len(pending)} 个IP...")
     for ip in pending:
-        location = online.get(ip, "未知")
-        parts = location.split()
+        loc = lookup_ip_geo(ip) or "未知"
+        parts = loc.split()
         stat_province = parts[1] if len(parts) >= 2 and parts[0] == "中国" else parts[0] if parts else "未知"
         stat_city = parts[2] if len(parts) >= 3 else stat_province
-        results[ip] = (location, stat_province, stat_city)
+        results[ip] = (loc, stat_province, stat_city)
     return results
 
 
