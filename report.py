@@ -610,6 +610,56 @@ def render(
             doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
         except Exception:
             pass
+    # 内网外联威胁研判：内网主机主动外联（源内网->目的外部），
+    # 目的命中公开威胁名单 = 疑似木马回连/挖矿（失陷信号）
+    _add_heading(doc, "内网外联威胁研判", 2)
+    _ext_dst = intdf.copy()
+    if len(_ext_dst) > 0 and "目的IP" in _ext_dst.columns:
+
+        def _is_ext_ip(ip):
+            try:
+                return not ipaddress.ip_address(str(ip).strip()).is_private
+            except ValueError:
+                return False
+
+        _ext_dst = _ext_dst[_ext_dst["目的IP"].notna() & _ext_dst["目的IP"].apply(_is_ext_ip)].copy()
+        # 外联目的聚合（源主机 x 目的IP）
+        _geo_col = "目的地理信息" if "目的地理信息" in _ext_dst.columns else None
+        _grp = (
+            _ext_dst.groupby(["源IP", "目的IP"])
+            .agg(
+                count=("目的IP", "size"),
+                geo=(_geo_col, "first") if _geo_col else ("目的IP", lambda x: ""),
+            )
+            .reset_index()
+        )
+        # 常见公共服务（DNS等），外联属正常：先排除再取 Top，聚焦可疑外联
+        _public_svc = {"114.114.114.114", "223.5.5.5", "8.8.8.8", "1.1.1.1", "119.29.29.29", "180.76.76.76"}
+        _grp = _grp[~_grp["目的IP"].astype(str).str.strip().isin(_public_svc)]
+        _grp = _grp.sort_values("count", ascending=False).head(15)
+        _ext_rows = []
+        for _idx, (_, _row) in enumerate(_grp.iterrows(), start=1):
+            _dst = str(_row["目的IP"]).strip()
+            _geo = str(_row["geo"]) if _row["geo"] is not None else ""
+            _geo = "" if _geo.lower() in ("nan", "none") else _geo[:20]
+            if _dst in bad_ips:
+                _lvl = "High"
+                _judge = "疑似木马回连/挖矿，建议隔离排查"
+            elif int(_row["count"]) >= 3:
+                _lvl = "观察"
+                _judge = "外联频繁，建议核查是否业务所需"
+            else:
+                _lvl = "观察"
+                _judge = "外联行为，业务核查"
+            _ext_rows.append((_idx, _row["源IP"], _row["目的IP"], _geo, int(_row["count"]), _lvl, _judge))
+        _add_table(
+            doc,
+            ["序号", "内网主机", "外联目的IP", "目的归属", "次数", "威胁分级", "研判"],
+            [41, 101, 121, 105, 41, 71, 161],
+            _ext_rows,
+        )
+    else:
+        _add_para(doc, "今日无内网外联行为。")
 
     # 七、重点事件研判
     _add_heading(doc, "七、重点事件研判", 1)
