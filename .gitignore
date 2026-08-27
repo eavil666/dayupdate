@@ -55,5 +55,9 @@ upx.exe
 # 但提交 .env.example 模板（脱敏，供参考）
 !.env.example
 
+# === 运行时缓存（IP 归属在线查询缓存，动态数据不入库）===
+geo_cache.json
+threat_feeds_cache.json
+
 # === WorkBuddy 项目记忆（本地工具数据，可能含 token 引用，不入库）===
 .workbuddy/
