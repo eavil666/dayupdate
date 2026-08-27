@@ -1,7 +1,7 @@
 [project]
 name = "network-security-daily-report"
 # 版本单一真源：build_exe.py / release.py 均从此处读取；发布新版本改这里即可
-version = "1.7.2"
+version = "1.7.3"
 description = "网络安全值守保障日报整合工具（IP归属分析 + 值守日报）"
 requires-python = ">=3.10"
 dependencies = [
