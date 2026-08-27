@@ -1,13 +1,13 @@
 {
-  "version": "1.7.1",
+  "version": "1.7.2",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.1/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.7.2/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.7.2/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.7.2/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.2/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.2/daily-report.exe"
   ],
-  "md5": "850342A27FD1DDE0F73564AE6DC6D31A",
-  "release_note": "v1.7.1 修复更新：\n- 外网攻击研判表\"状态\"列：已封禁 改为 已处置\n- 当日态势总览措辞同步：\"累计封禁 IP\" 改为 \"累计处置 IP\"\n（处置动作表述统一，不再局限于\"封禁\"）",
+  "md5": "1D8C1FB7DA37F50C2BD72F18A886BD0A",
+  "release_note": "v1.7.2 功能更新（今日日报优化大版本）\n研判增强：\n1. 外网/内网研判表新增\"威胁源分级\"列（命中公开威胁名单显示 High×N）；状态统一\"已处置\"\n2. 内网外联威胁研判表：内网主机主动外联 Top15（排除公共DNS/本地长春目的），目的归属三级补全\n3. 重点事件后自动研判结论（命中名单源已在防火墙实施封禁）\n图表：\n4. 三张内嵌图：威胁等级分布柱状图 + 外网/内网攻击类型 TOP8 条形图（PIL 手绘，不引 matplotlib）\n攻击面聚焦（呼应周报）：\n5. 攻击源 /24 网段聚合（哪些网段在扫）\n6. 被攻击目标 Top（排除公共DNS，内网重点资产一目了然）\n7. 情报IOC命中清单（morphed.ru/xred.mooo.com/api.ceye.io 等实锤）\n归属链路：\n8. IP归属三级查询：缓存 -> ip2region离线 -> 在线failover（pconline/百度/ipwho.is）；\n   修复\"查询失败(index out of range)\"不触发补全的bug\n9. 外网攻击分析纳入\"外部->单位公网资产(互联网出口)\"（业务ip.xlsx登记出口IP）\n稳定性：\n10. docx 被 WPS/Word 占用时自动存备用名；离线查询失败自动在线补全",
   "force_update": false
 }
