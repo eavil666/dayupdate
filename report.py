@@ -719,8 +719,9 @@ def render(
     _ioc = df[df["情报IOC"].notna()].copy()
     if len(_ioc) > 0:
         _ioc = _ioc[_ioc["情报IOC"].astype(str).str.strip() != ""]
-    # 不排除 DNS 目的（内网主机经 DNS 解析恶意域名仍属情报命中），
-    # 但不展示目标 IP（多为 DNS 干扰），聚焦"源 IP + IOC"去重聚合
+    # 仅展示内网主机触发的 IOC（源 IP 私网），过滤业务公网 IP/单位出口资产
+    if len(_ioc) > 0 and "源IP" in _ioc.columns:
+        _ioc = _ioc[_ioc["源IP"].astype(str).apply(is_private_ip)]
     if len(_ioc) > 0:
         _ioc_grp = (
             _ioc.groupby(["源IP", "攻击名称", "情报IOC"])
