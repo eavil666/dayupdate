@@ -362,12 +362,17 @@ def _render_level_chart(stats, save_path):
         return None
 
 
-def _render_attack_chart(ext_df, save_path):
-    """PIL 手绘外网攻击类型 Top 横向条形图（名称长，横条更清晰），失败返回 None。"""
+def _render_attack_chart(attack_df, save_path, title=None, color="#C00000"):
+    """PIL 手绘攻击类型 Top 横向条形图（名称长，横条更清晰），失败返回 None。
+
+    attack_df：含"攻击名称"列的告警 DataFrame（外网或内网均可）
+    title：图标题（默认"外网攻击类型分布 TOP8"）
+    color：柱体颜色（外网红 / 内网蓝）
+    """
     try:
         from PIL import Image, ImageDraw, ImageFont
 
-        counts = ext_df["攻击名称"].value_counts().head(8)
+        counts = attack_df["攻击名称"].value_counts().head(8)
         if len(counts) == 0:
             return None
         items = [(str(k), int(v)) for k, v in counts.items()]
@@ -397,7 +402,7 @@ def _render_attack_chart(ext_df, save_path):
         except Exception:
             f_title = f_label = f_axis = ImageFont.load_default()
 
-        d.text((W // 2, 18), "外网攻击类型分布 TOP8", font=f_title, fill="black", anchor="mm")
+        d.text((W // 2, 18), title or "外网攻击类型分布 TOP8", font=f_title, fill="black", anchor="mm")
 
         max_val = max(v for _, v in items)
         # 坐标轴
@@ -407,9 +412,9 @@ def _render_attack_chart(ext_df, save_path):
         for i, (name, v) in enumerate(items):
             y = margin_t + i * row_h
             bw = plot_w * v / max_val
-            d.rectangle([margin_l, y, margin_l + bw, y + bar_h], fill="#C00000")
+            d.rectangle([margin_l, y, margin_l + bw, y + bar_h], fill=color)
             if v > 0:
-                d.text((margin_l + bw + 6, y + bar_h / 2), str(v), font=f_axis, fill="#C00000", anchor="lm")
+                d.text((margin_l + bw + 6, y + bar_h / 2), str(v), font=f_axis, fill=color, anchor="lm")
             # 名称（右侧截断，避免超宽）
             label = name if len(name) <= 16 else name[:15] + "…"
             d.text((margin_l - 8, y + bar_h / 2), label, font=f_label, fill="black", anchor="rm")
@@ -592,6 +597,19 @@ def render(
         [41, 173, 51, 71, 106, 41],
         int_rows,
     )
+    # 内网攻击类型分布图（PIL 横向条形图，蓝色区分外网；失败静默跳过）
+    _int_chart = _render_attack_chart(
+        intdf,
+        os.path.join(tempfile.gettempdir(), f"int_chart_{date}.png"),
+        title="内网攻击类型分布 TOP8",
+        color="#4472C4",
+    )
+    if _int_chart:
+        try:
+            doc.add_picture(_int_chart, width=docx.shared.Cm(15))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        except Exception:
+            pass
 
     # 七、重点事件研判
     _add_heading(doc, "七、重点事件研判", 1)
