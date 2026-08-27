@@ -621,10 +621,25 @@ def extract_source_ips(file_path):
     df["源IP类型"] = df["源 IP"].apply(get_ip_type)
     df["目标IP类型"] = df["目标 IP"].apply(get_ip_type)
     external_to_internal = df[(df["源IP类型"] == "external") & (df["目标IP类型"] == "internal")].copy()
+    # 外部源 -> 单位公网资产（业务ip.xlsx 登记的互联网出口/业务地址）：
+    # 属"外部攻击互联网出口"，与 外->内 同为外部攻击源，合并进外网分析
+    ext_to_biz = df[
+        (df["源IP类型"] == "external")
+        & (df["目标IP类型"] == "external")
+        & (df["目标 IP"].apply(is_excluded_ip))
+    ].copy()
     internal_df = df[df["源IP类型"] == "internal"].copy()
     external_ips = []
-    if len(external_to_internal) > 0:
-        external_ips = external_to_internal["源 IP"].drop_duplicates().tolist()
+    for _part in (external_to_internal, ext_to_biz):
+        if len(_part) > 0:
+            external_ips.extend(_part["源 IP"].drop_duplicates().tolist())
+    # 去重保序
+    seen, uniq = set(), []
+    for ip in external_ips:
+        if ip not in seen:
+            seen.add(ip)
+            uniq.append(ip)
+    external_ips = uniq
     internal_ips = []
     if len(internal_df) > 0:
         internal_ips = internal_df["源 IP"].drop_duplicates().tolist()
@@ -790,13 +805,13 @@ def generate_ip_report(files, date, local_geos=None):
     # 威胁分级配色（红=危险，绿=干净，本地黄底优先）
     threat_fill = {
         "Critical": PatternFill(start_color="C00000", end_color="C00000", fill_type="solid"),
-        "High":     PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid"),
-        "Clean":    PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
+        "High": PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid"),
+        "Clean": PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
     }
     threat_font = {
         "Critical": Font(bold=True, color="FFFFFF"),
-        "High":     Font(bold=True, color="FFFFFF"),
-        "Clean":    Font(color="006100"),
+        "High": Font(bold=True, color="FFFFFF"),
+        "Clean": Font(color="006100"),
     }
     for idx, ip in enumerate(external_ip_list, start=1):
         location, _, _ = location_map.get(ip, ("未知", "未知", "未知"))
