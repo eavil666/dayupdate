@@ -646,21 +646,23 @@ def render(
         _public_svc = {"114.114.114.114", "223.5.5.5", "8.8.8.8", "1.1.1.1", "119.29.29.29", "180.76.76.76"}
         _grp = _grp[~_grp["目的IP"].astype(str).str.strip().isin(_public_svc)]
         _grp = _grp.sort_values("count", ascending=False).head(15)
+        # 本地归属关键词（默认长春；conf["geos"] 自动提取时跟随）
+        _local_geos = conf.get("geos") or {"长春"}
         _ext_rows = []
         for _idx, (_, _row) in enumerate(_grp.iterrows(), start=1):
             _dst = str(_row["目的IP"]).strip()
             _geo = _lookup_geo(_dst) or (str(_row["geo"]) if _row["geo"] is not None else "")
             _geo = "" if _geo.lower() in ("nan", "none") else _geo[:20]
+            # 目的归属为本地（如长春）→ 视为本地业务访问，不显示
+            if any(g and g in _geo for g in _local_geos):
+                continue
             if _dst in bad_ips:
                 _lvl = "High"
-                _judge = "疑回连/挖矿，建议隔离"
             elif int(_row["count"]) >= 3:
                 _lvl = "观察"
-                _judge = "外联频繁，核查业务"
             else:
                 _lvl = "观察"
-                _judge = "外联行为，业务核查"
-            _ext_rows.append((_idx, _row["源IP"], _row["目的IP"], _geo, int(_row["count"]), _lvl, _judge))
+            _ext_rows.append((len(_ext_rows) + 1, _row["源IP"], _row["目的IP"], _geo, int(_row["count"]), _lvl, "已处置"))
         # 列宽总 450pt（页面约 15cm 可放下）；研判列 130pt 装下 11 字中文，Geo 大多空给窄
         _add_table(
             doc,
