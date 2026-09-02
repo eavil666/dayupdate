@@ -154,14 +154,29 @@ def _set_run_font(run, size=None, bold=None):
         run.bold = bold
 
 
+def _is_example_line(line):
+    """是否为示例占位行（兼容全/半角冒号）"""
+    return line.startswith("示例：") or line.startswith("示例:")
+
+
 def _parse_lines(text, skip_example=True):
-    """解析多行文本：按换行分割，去除空行和序号前缀"""
+    """解析多行文本：按换行分割，去除空行和序号前缀。
+
+    skip_example=True 时忽略示例占位块：GUI 占位示例形如
+    「示例：\\n1. xx\\n2. xx」，仅首行带"示例："前缀。若只按行过滤会把
+    后续条目行漏进日报，故先判断首行——整体以"示例："开头则整块丢弃。
+    """
     if not text or not text.strip():
         return []
+    text = text.strip()
+    if skip_example:
+        first = text.split("\n", 1)[0].strip()
+        if _is_example_line(first):
+            return []
     items = []
     for line in text.split("\n"):
         line = line.strip()
-        if line and (not skip_example or not line.startswith("示例：")):
+        if line and (not skip_example or not _is_example_line(line)):
             line = re.sub(r"^\d+\.\s*", "", line)
             items.append(line)
     return items
@@ -792,7 +807,7 @@ def render(
     # 九、情报动态
     _add_heading(doc, "九、情报动态", 1)
     _add_para(doc, "当日需关注的新增 CVE / 行业预警：")
-    intel_parsed = _parse_lines(intel_items, skip_example=False)
+    intel_parsed = _parse_lines(intel_items)
     if intel_parsed:
         _add_numbered_list(doc, intel_parsed)
     elif intel_list:
@@ -822,7 +837,7 @@ def render(
         "失陷终端取证与隔离",
         "资产健康检查异常处理",
     ]
-    follow_parsed = _parse_lines(follow_items, skip_example=False)
+    follow_parsed = _parse_lines(follow_items)
     _add_numbered_list(doc, follow_parsed if follow_parsed else default_items)
 
     try:

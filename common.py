@@ -35,8 +35,6 @@ _gui_progress_callback = None
 
 # ---- 日志级别 ----
 INFO = "INFO"
-WARN = "WARN"
-ERROR = "ERROR"
 
 # 文件日志路径（追加；*.log 已在 .gitignore，不入库）
 _log_file_path = os.path.join(runtime_dir, "app.log")
@@ -76,16 +74,6 @@ def _log(msg, level=INFO):
         _gui_log_callback(msg)
     else:
         print(f"[{datetime.now():%H:%M:%S}] [{level}] {msg}", flush=True)
-
-
-def _log_warn(msg):
-    """警告级别日志"""
-    _log(msg, WARN)
-
-
-def _log_err(msg):
-    """错误级别日志"""
-    _log(msg, ERROR)
 
 
 def _set_progress(value, maximum=None):

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """upload_intel.py - 威胁情报库每日发布到 GitHub Release（供日报 exe 多端下载）
 
 将本地 data/db.json 覆盖上传为固定 tag Release 的 asset：
@@ -106,7 +105,7 @@ def ensure_release(token):
     body = {
         "tag_name": TAG,
         "name": "威胁情报库（每日更新）",
-        "body": "每日 8:30 自动更新的威胁情报库快照（Spamhaus DROP/EDROP + blocklist.de + CINSscore + Feodo）。\n\n供网络安全值守保障日报 exe 的\"更新情报库\"功能下载。",
+        "body": "每日 8:30 自动更新的威胁情报库快照（Spamhaus DROP/EDROP + blocklist.de + CINSscore + Feodo）。\n\n供网络安全值守保障日报 exe 的\"威胁源更新\"功能下载。",
         "draft": False,
         "prerelease": True,
     }

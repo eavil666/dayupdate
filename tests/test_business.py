@@ -276,3 +276,60 @@ def test_query_all_ips_online(tmp_path, monkeypatch):
     results = ipdb.query_all_ips(["8.8.8.8", "10.0.0.1"])
     assert "中国" in results["8.8.8.8"][0]
     assert results["10.0.0.1"][0] == "内网/保留地址"
+
+
+def test_generate_ip_report_threat_same_caliber_as_report(tmp_path, monkeypatch):
+    """归属表威胁分级与日报同口径：仅命中恶意段(非精确)的 IP 也标 High，不落 Clean。
+
+    回归：旧实现用 load_bad_ips 精确集合做 `ip in bad_ips`，段内 IP 被判 Clean，
+    与日报 match_ip(精确+段) 不一致；修复后归属表逐 IP 同样走 match_ip。
+    """
+    import json
+
+    import pandas as pd
+    from openpyxl import load_workbook
+
+    import ipdb
+    import threat_check
+
+    # 隔离模块级状态：清空排除 IP 与威胁索引
+    monkeypatch.setattr(ipdb, "EXCLUDED_IP_NETWORKS", [])
+    monkeypatch.setattr(ipdb, "runtime_dir", str(tmp_path))
+    monkeypatch.setattr(threat_check, "runtime_dir", str(tmp_path))
+    threat_check._ACTIVE = None
+    threat_check._CACHE_FILE = None
+    monkeypatch.setattr(
+        ipdb, "query_all_ips", lambda ips: {ip: ("测试地", "省", "市") for ip in ips}
+    )
+    monkeypatch.setattr(ipdb, "load_terminal_ip_table", lambda: {})
+    monkeypatch.setattr(
+        ipdb, "load_config", lambda files=None, local_geos=None: {"geos": set()}
+    )
+
+    # 本地情报库：1 个精确 IP + 1 个恶意段
+    (tmp_path / "threat_db.json").write_text(
+        json.dumps(
+            {
+                "updated_at": "2026-09-02 08:00:00",
+                "sources": {"srcA": {"label": "测试源A"}},
+                "ip_sets": {"srcA": ["8.8.8.8"]},
+                "cidrs": [{"net_str": "1.2.3.0/24", "source": "srcA"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    alert = tmp_path / "alerts.xlsx"
+    pd.DataFrame(
+        {
+            "源 IP": ["1.2.3.55", "8.8.8.8", "9.9.9.9"],
+            "目标 IP": ["10.0.0.2", "10.0.0.2", "10.0.0.2"],
+        }
+    ).to_excel(alert, index=False)
+
+    out = ipdb.generate_ip_report([alert], "20260902")
+    ws = load_workbook(out)["外网攻击IP归属"]
+    rows = {r[1]: r[3] for r in ws.iter_rows(min_row=2, values_only=True)}
+    # 段命中 → 威胁（与日报 match_ip 同口径，修复前此处误判 Clean）
+    assert rows["1.2.3.55"] == "High(测试源A(1.2.3.0/24))"
+    assert rows["8.8.8.8"].startswith("High")  # 精确命中
+    assert rows["9.9.9.9"] == "Clean"  # 未命中

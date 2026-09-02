@@ -177,3 +177,78 @@ def test_render_generates_docx(tmp_path):
         intel_items="1. CVE-2024-1 高危",
     )
     assert out.exists() and out.stat().st_size > 1000
+
+
+def test_parse_lines_drops_example_block():
+    """示例占位块（示例：\n1. xx\n2. xx）应整块丢弃，后续条目行不得漏进日报。
+
+    回归：此前只按行过滤"示例："前缀，示例块的 1./2. 条目行会泄漏到日报
+    「重点工作总结」里（如"1. 完成防火墙规则优化"）。
+    """
+    from report import _parse_lines
+
+    # GUI 占位示例原样传回 → 整块丢弃
+    assert _parse_lines("示例：\n1. 完成防火墙规则优化\n2. 处置高危漏洞告警") == []
+    assert _parse_lines("示例：\n1. CVE-2024-XXXX 高危漏洞，需尽快修复") == []
+    # 半角冒号同样识别
+    assert _parse_lines("示例:\n1. 完成防火墙规则优化") == []
+    # 用户真实输入不受影响
+    assert _parse_lines("1. 完成整改\n2. 处置告警") == ["完成整改", "处置告警"]
+    # 空输入 → 空列表
+    assert _parse_lines("") == []
+    assert _parse_lines(None) == []
+
+
+def test_render_example_placeholder_not_in_docx(tmp_path):
+    """docx 成品不得出现 GUI 示例占位中的条目。
+
+    回归：用户未填写「重点工作总结/情报动态」时，示例文本曾以
+    "2. 完成防火墙规则优化""3. 处置高危漏洞告警"形式写进日报正文。
+    """
+    import docx as docxlib
+
+    from report import LEVELS, render
+
+    conf = {
+        "title": "测试日报",
+        "retention": 180,
+        "top": 5,
+        "crit_levels": {"严重", "高危"},
+        "probes": [("探针A", "1.1.1.1")],
+    }
+    df = pd.DataFrame(
+        {
+            "攻击名称": ["端口扫描", "弱口令"],
+            "源IP": ["1.2.3.4", "10.0.0.1"],
+            "威胁等级": ["高危", "中危"],
+            "网络类型": ["外网", "内网"],
+            "目的IP": ["10.0.0.1", "10.0.0.2"],
+        }
+    )
+    stats = {
+        "total": 2,
+        "int_count": 1,
+        "ext_count": 1,
+        "ban_count": 1,
+        "int_level": {lv: 0 for lv in LEVELS},
+        "ext_level": {lv: 0 for lv in LEVELS},
+        "internal": df[df["网络类型"] == "内网"],
+        "external": df[df["网络类型"] == "外网"],
+    }
+    out = tmp_path / "report.docx"
+    render(
+        conf,
+        df,
+        stats,
+        conf["probes"],
+        [],
+        "20260719",
+        str(out),
+        work_summary="示例：\n1. 完成防火墙规则优化\n2. 处置高危漏洞告警",
+        intel_items="示例：\n1. CVE-2024-XXXX 高危漏洞，需尽快修复",
+        follow_items="示例：\n1. 内网高危告警溯源",
+    )
+    d = docxlib.Document(str(out))
+    text = "\n".join(p.text for p in d.paragraphs)
+    for leaked in ("完成防火墙规则优化", "处置高危漏洞告警", "CVE-2024-XXXX"):
+        assert leaked not in text, f"示例内容泄漏进日报正文: {leaked}"

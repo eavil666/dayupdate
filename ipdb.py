@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from common import _find_file, _log, _set_progress, runtime_dir, script_dir
-from updater import get_requests_verify, safe_get
+from updater import safe_get
 
 
 def _load_excluded_ip_networks(config_path: str = None) -> list:
@@ -403,8 +403,6 @@ def format_online_result(data):
     return " ".join(parts) if parts else "未知"
 
 
-BATCH_SIZE = 100
-BATCH_INTERVAL = 1.5
 XDB_FILE = None
 DOWNLOAD_SOURCES = [
     "https://edgeone.gh-proxy.com/https://github.com/lionsoul2014/ip2region/raw/refs/heads/master/data/ip2region_v4.xdb",
@@ -532,31 +530,6 @@ def query_offline(searcher, ips):
                 results[ip] = parse_region(raw)
         except Exception as exc:
             results[ip] = (f"查询失败({exc})", "查询失败", "查询失败")
-    return results
-
-
-def query_online_batch(ips):
-    import requests
-
-    results = {}
-    public_ips = [ip for ip in ips if is_valid_public_ip(ip)]
-    if not public_ips:
-        return results
-    url = "http://ip-api.com/batch?lang=zh-CN"
-    fields = "status,message,country,regionName,city,isp,query"
-    for i in range(0, len(public_ips), BATCH_SIZE):
-        chunk = public_ips[i : i + BATCH_SIZE]
-        payload = [{"query": ip, "fields": fields} for ip in chunk]
-        try:
-            resp = requests.post(url, json=payload, timeout=30, verify=get_requests_verify())
-            resp.raise_for_status()
-            for item in resp.json():
-                ip_addr = item.get("query", "")
-                results[ip_addr] = format_online_result(item)
-        except Exception as e:
-            _log(f"在线查询失败: {e}")
-        if i + BATCH_SIZE < len(public_ips):
-            time.sleep(BATCH_INTERVAL)
     return results
 
 
@@ -920,21 +893,27 @@ def generate_ip_report(files, date, local_geos=None):
     internal_ip_list = list(all_internal_ips)
     excluded_ip_list = list(all_excluded_ips)
     location_map = query_all_ips(external_ip_list)
-    # 威胁分级：公开威胁源匹配（threat_check 模块，磁盘缓存 6 小时；失败/超时降级"未查"）
-    bad_ips, threat_sources = set(), {}
+    # 威胁分级：与日报同口径走 threat_check.match_ip（精确 IP + CIDR 恶意段命中）。
+    # load_bad_ips 负责初始化命中索引（本地 threat_db.json 优先，联网 3 源兜底），
+    # 其返回的精确集合仅作"名单可用"标志与日志；逐 IP 判定用 match_ip，
+    # 避免归属表把"仅命中恶意段"的 IP 误标为 Clean 而与日报不一致。
+    bad_ips, _threat_sources, _match_ip = set(), {}, None
     try:
-        from threat_check import check_ip as _threat_check_ip
         from threat_check import load_bad_ips
+        from threat_check import match_ip as _match_ip
 
         _cache_file = Path(runtime_dir) / "threat_feeds_cache.json"
-        bad_ips, threat_sources = load_bad_ips(str(_cache_file))
+        bad_ips, _threat_sources = load_bad_ips(str(_cache_file))
         if bad_ips:
-            _log(f"[+] 威胁名单加载: {len(bad_ips)} 条（缓存 {_cache_file.name}）")
+            _log(
+                f"[+] 威胁名单加载: {len(bad_ips)} 条"
+                f"（缓存 {_cache_file.name}，支持精确+恶意段命中）"
+            )
         else:
-            _log("[!] 威胁名单为空（网络不可达？），外网IP威胁分级显示为 未查")
+            _log("[!] 威胁名单为空（本地库缺失且联网兜底不可达？），外网IP威胁分级显示为 未查")
     except Exception as _e:
         _log(f"[!] 威胁分级初始化失败: {_e}")
-        bad_ips, threat_sources = set(), {}
+        bad_ips, _threat_sources, _match_ip = set(), {}, None
     # 查询排除IP的归属地
     excluded_location_map = query_all_ips(excluded_ip_list) if excluded_ip_list else {}
     load_terminal_ip_table()
@@ -988,12 +967,14 @@ def generate_ip_report(files, date, local_geos=None):
         if local_geos_set and any(g in str(location) for g in local_geos_set):
             remark = "本地IP"
             is_local = True
-        # 威胁分级
-        if bad_ips and ip in bad_ips:
-            _level, _hits = _threat_check_ip(ip, bad_ips, threat_sources)
-            threat_txt = f"{_level}({','.join(_hits)})" if _hits else _level
-        elif bad_ips:
-            threat_txt = "Clean"
+        # 威胁分级（与日报同一命中口径：精确 IP + CIDR 恶意段）
+        if bad_ips:
+            _hits = _match_ip(ip) if _match_ip else []
+            if _hits:
+                _level = "Critical" if len(_hits) >= 2 else "High"
+                threat_txt = f"{_level}({','.join(_hits)})"
+            else:
+                threat_txt = "Clean"
         else:
             threat_txt = "未查"
         ws1.append([idx, ip, location, threat_txt, remark])

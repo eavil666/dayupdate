@@ -63,6 +63,8 @@ threat_feeds_cache.json
 threat_db.json
 # tools/threat-intel 建库脚本的运行产物（data/db.json + data/raw/*），由 GitHub Actions 生成后直接发布，不入 git
 tools/threat-intel/data/
+# 归档的过时 demo/遗留脚本（保留参考，不入库）
+tools/legacy/
 
 # === WorkBuddy 项目记忆（本地工具数据，可能含 token 引用，不入库）===
 .workbuddy/

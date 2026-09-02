@@ -58,16 +58,22 @@ class DailyReportGUI:
         # 启动时后台自动检查更新（静默模式，不打扰用户）
         threading.Thread(target=self._check_update_startup, daemon=True).start()
 
+        # 启动时后台检查威胁源：刷新标题栏库信息 + 轻量探测远端比对，发现新版才询问
+        threading.Thread(target=self._check_intel_startup, daemon=True).start()
+
     def _build_ui(self):
         # 顶部标题
         title_frame = Frame(self.master, padx=10, pady=5)
         title_frame.pack(fill="x")
         Label(title_frame, text="网络安全值守保障日报", font=("宋体", 16, "bold")).pack(side="left")
         Label(title_frame, text=f"v{self.app_version}", font=("宋体", 9), fg="#666666").pack(side="left", padx=(10, 0))
+        self.intel_var = StringVar(value="威胁源: 读取中…")
+        self.intel_label = Label(title_frame, textvariable=self.intel_var, font=("宋体", 9), fg="#888888")
+        self.intel_label.pack(side="left", padx=(12, 0))
         Button(title_frame, text="检查更新", command=self._check_update_manual, width=10, font=("宋体", 9)).pack(
             side="right"
         )
-        Button(title_frame, text="更新情报库", command=self._update_intel_manual, width=10, font=("宋体", 9)).pack(
+        Button(title_frame, text="威胁源更新", command=self._update_intel_manual, width=10, font=("宋体", 9)).pack(
             side="right"
         )
 
@@ -376,6 +382,9 @@ class DailyReportGUI:
 
                     # 获取用户输入的重点工作总结
                     work_summary = self.work_summary_text.get("1.0", END).strip()
+                    # 如果输入内容等于示例文本，视为未填写
+                    if work_summary == EXAMPLE_WORK_SUMMARY:
+                        work_summary = None
 
                     # 获取用户输入的待跟进事项
                     follow_items = self.follow_items_text.get("1.0", END).strip()
@@ -445,38 +454,109 @@ class DailyReportGUI:
         else:
             messagebox.showwarning("提示", "值守日报文件不存在")
 
+    # ---------------- 威胁源状态展示 / 启动比对 ----------------
+    def _check_intel_startup(self):
+        """启动后台：刷新标题栏库信息；轻量探测远端最新库日期，发现新版才询问是否更新。"""
+        try:
+            from threat_check import intel_status, remote_intel_info
+
+            st = intel_status()
+            self.master.after(0, lambda: self._refresh_intel_label(st))
+            remote = remote_intel_info()  # Range 头部 2KB 探测，不完整下载
+            if remote.get("updated_at") is None:
+                if st.get("mode") == "none":
+                    self._log('[威胁源] 本地无库且远端暂不可达，可稍后点击右上角"威胁源更新"')
+                return  # 网络异常静默，不打扰
+            remote_ts, local_ts = remote["updated_at"], st.get("updated_at")
+            if local_ts and local_ts >= remote_ts:
+                self._log(f"[威胁源] 已是最新（本地 {local_ts} = 发布 {remote_ts}，来自 {remote['host']}）")
+                return
+
+            def _ask():
+                try:
+                    if messagebox.askyesno(
+                        "发现新威胁源",
+                        f"检测到新的威胁源库：\n\n"
+                        f"当前本地: {local_ts or '无（威胁源分级将不生效）'}\n"
+                        f"最新发布: {remote_ts}（来自 {remote['host']}）\n\n"
+                        "是否立即下载更新？",
+                        parent=self.master,
+                    ):
+                        self._run_intel_update()
+                    else:
+                        self._log("[威胁源] 已跳过本次更新，本地库仍可继续使用")
+                except Exception:
+                    pass
+
+            self.master.after(0, _ask)
+        except Exception as e:
+            import traceback
+
+            self._log(f"[威胁源] 启动检查失败: {e}\n{traceback.format_exc()}")
+
+    def _refresh_intel_label(self, st=None):
+        """刷新标题栏威胁源状态文字（须在主线程调用）。库龄超阈值红字提示。"""
+        try:
+            from threat_check import INTEL_MAX_AGE_HOURS, intel_status
+
+            st = st or intel_status()
+            if st.get("mode") == "db":
+                age = st.get("age_hours")
+                stale = age is not None and age > INTEL_MAX_AGE_HOURS
+                txt = f"威胁源 {st.get('updated_at') or '?'} · {st.get('total_ips', 0)}IP/{st.get('total_cidrs', 0)}段"
+                if stale:
+                    txt += f" · 已{age:.0f}h 建议更新"
+                self.intel_var.set(txt)
+                self.intel_label.config(fg="#c0392b" if stale else "#2e7d32")
+            elif st.get("mode") == "legacy":
+                self.intel_var.set("威胁源: 联网兜底模式（无本地库）")
+                self.intel_label.config(fg="#b9770e")
+            else:
+                self.intel_var.set("威胁源: 无本地库，请更新")
+                self.intel_label.config(fg="#c0392b")
+        except Exception:
+            pass
+
     # ---------------- 更新相关方法 ----------------
     def _update_intel_manual(self):
-        """更新情报库按钮回调：确认后后台下载最新 threat_db.json，不卡界面"""
+        """威胁源更新按钮回调：确认后后台下载最新 threat_db.json，不卡界面"""
         try:
             if not messagebox.askyesno(
-                "更新情报库", "将从发布源下载最新威胁情报库（threat_db.json）覆盖本地，是否继续？"
+                "威胁源更新",
+                "将自动测速选择最快的下载源（GitHub 官方 + 国内加速镜像），"
+                "下载最新威胁源库（threat_db.json）覆盖本地，是否继续？",
             ):
                 return
             threading.Thread(target=self._run_intel_update, daemon=True).start()
         except Exception as e:
             import traceback
 
-            self._log(f"更新情报库启动失败: {e}\n{traceback.format_exc()}")
+            self._log(f"威胁源更新启动失败: {e}\n{traceback.format_exc()}")
 
     def _run_intel_update(self):
-        """在后台线程执行情报库下载（使用主线程安全回调反馈结果）"""
+        """在后台线程执行威胁源库下载（使用主线程安全回调反馈结果）。防重入。"""
+        if getattr(self, "_intel_updating", False):
+            self._log("[威胁源] 更新已在后台进行中，请稍候")
+            return
+        self._intel_updating = True
         try:
             from threat_check import intel_status, update_intel
 
-            self._log(f"[情报库] 当前: {intel_status().get('detail', '未知')}")
+            self._log(f"[威胁源] 当前: {intel_status().get('detail', '未知')}")
             ok, msg = update_intel()
-            self._log(f"[情报库] {'✓ 更新成功' if ok else '✗ 更新失败'}: {msg}")
+            self._log(f"[威胁源] {'✓ 更新成功' if ok else '✗ 更新失败'}: {msg}")
             st = intel_status().get("detail", "") if ok else ""
             if st:
-                self._log(f"[情报库] 生效: {st}")
+                self._log(f"[威胁源] 生效: {st}")
 
             def _show():
                 try:
                     (messagebox.showinfo if ok else messagebox.showerror)(
-                        "情报库更新成功" if ok else "情报库更新失败",
+                        "威胁源更新成功" if ok else "威胁源更新失败",
                         msg + (f"\n\n{st}" if st else ""),
                     )
+                    if ok:
+                        self._refresh_intel_label()  # 更新成功后同步标题栏
                 except Exception:
                     pass
 
@@ -484,7 +564,9 @@ class DailyReportGUI:
         except Exception as e:
             import traceback
 
-            self._log(f"[情报库] 更新异常: {e}\n{traceback.format_exc()}")
+            self._log(f"[威胁源] 更新异常: {e}\n{traceback.format_exc()}")
+        finally:
+            self._intel_updating = False
 
     def _check_update_manual(self):
         """手动检查更新按钮回调（强制弹窗）"""

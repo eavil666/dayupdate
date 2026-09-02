@@ -9,6 +9,7 @@
 """
 import json
 import sys
+import urllib.error
 
 import pytest
 
@@ -228,8 +229,132 @@ def test_intel_url_from_config_fallback(monkeypatch):
 
 
 def test_intel_status_modes(db_file, monkeypatch):
-    """intel_status：有库显示 db 模式；无库显示 none（不触发联网）。"""
+    """intel_status：有库显示 db 模式（含结构化版本字段）；无库显示 none（不触发联网）。"""
     monkeypatch.setattr(threat_check, "runtime_dir", str(db_file.parent))
     st = threat_check.intel_status()
     assert st["mode"] == "db"
     assert "本地情报库" in st["detail"]
+    # 结构化字段：供 GUI 启动比对"本地 vs 远端版本日期"
+    assert st["updated_at"] == "2026-09-02 08:00:00"
+    assert st["total_ips"] == 2
+    assert st["total_cidrs"] == 2
+    assert st["age_hours"] is not None
+
+
+# ---------------- 远端版本比对（Range 头部 2KB 轻量探测） ----------------
+
+INTEL_HEAD = (
+    b'{\n "updated_at": "2026-09-02 08:25:55",\n'
+    b' "sources": {"spamhaus_drop": {"label": "SpamhausDROP", "count": 6}},\n'
+    b' "ip_sets": {...'
+)
+
+
+def test_remote_meta_extract(monkeypatch):
+    """头部字节解析 updated_at：正常提取 / 无该键 / 读不到均不炸。"""
+    monkeypatch.setattr(threat_check, "_read_head", lambda url, n, timeout=5: INTEL_HEAD)
+    assert threat_check._remote_meta_one("https://x/db.json") == "2026-09-02 08:25:55"
+
+    monkeypatch.setattr(threat_check, "_read_head", lambda url, n, timeout=5: b'{"foo": 1}')
+    assert threat_check._remote_meta_one("https://x/db.json") is None
+
+    monkeypatch.setattr(threat_check, "_read_head", lambda url, n, timeout=5: None)
+    assert threat_check._remote_meta_one("https://x/db.json") is None
+
+
+def test_probe_remote_candidates_sorts_by_latency(monkeypatch):
+    """并行读取候选头部：可达者按耗时升序返回（快的排前）。"""
+    import time as _time
+
+    def fake(url, timeout=5):
+        _time.sleep(0.15 if "slow" in url else 0.02)
+        return "2026-09-02 08:25:55"
+
+    monkeypatch.setattr(threat_check, "_remote_meta_one", fake)
+    res = threat_check._probe_remote_candidates(
+        ["https://slow.example/db.json", "https://fast.example/db.json"]
+    )
+    assert len(res) == 2
+    assert res[0][1] == "https://fast.example/db.json"  # 快源排第一
+    assert all(r[0] == "2026-09-02 08:25:55" for r in res)
+
+
+def test_remote_intel_info_reachable(monkeypatch):
+    """远端可达：返回最快源版本日期与 host（识别官方/镜像）。"""
+    monkeypatch.setattr(threat_check, "runtime_dir", "X:/nope")  # 无 config.ini → 官方+镜像候选
+    url = (
+        "https://ghfast.top/"
+        "https://github.com/eavil666/dayupdate/releases/download/threat-intel-latest/threat_db.json"
+    )
+    monkeypatch.setattr(
+        threat_check,
+        "_probe_remote_candidates",
+        lambda urls: [("2026-09-02 08:25:55", url, 0.3), ("2026-09-02 08:25:55", urls[0], 1.2)],
+    )
+    info = threat_check.remote_intel_info()
+    assert info["updated_at"] == "2026-09-02 08:25:55"
+    assert info["host"] == "ghfast.top"
+    assert info["reachable"] == 2 and info["total"] >= 2
+
+
+def test_remote_intel_info_unreachable(monkeypatch):
+    """远端全部不可达：updated_at=None、host=None，不抛异常。"""
+    monkeypatch.setattr(threat_check, "_probe_remote_candidates", lambda urls: [])
+    info = threat_check.remote_intel_info()
+    assert info["updated_at"] is None
+    assert info["host"] is None
+    assert info["reachable"] == 0
+
+
+# ---------------- 多源择优下载（官方 + 加速镜像） ----------------
+
+FAST_MIRROR = (
+    "https://ghfast.top/"
+    "https://github.com/eavil666/dayupdate/releases/download/threat-intel-latest/threat_db.json"
+)
+
+
+def test_update_intel_multi_source_picks_fastest(db_file, monkeypatch):
+    """默认多源路径：测速择优结果优先 → 用最快源下载，msg 标注实际下载源域名。"""
+    dest = db_file.parent / "threat_db.json"
+    dest.unlink()  # 模拟目标不存在
+    monkeypatch.setattr(threat_check, "runtime_dir", str(db_file.parent))  # 无 config.ini → 官方+镜像
+    monkeypatch.setattr(threat_check, "_probe_candidates", lambda urls: [FAST_MIRROR])
+    monkeypatch.setattr(
+        threat_check,
+        "_http_read",
+        lambda url, timeout=30: json.dumps(
+            _sample_db(updated_at="2026-09-02 12:00:00")
+        ).encode(),
+    )
+
+    ok, msg = threat_check.update_intel(dest=str(dest))
+    assert ok
+    assert "情报库已更新" in msg
+    assert "下载源: ghfast.top" in msg  # 用户可辨识当前走的源
+    assert dest.exists()
+
+
+def test_update_intel_all_sources_down(db_file, monkeypatch):
+    """多源全部不可达（测速全挂 → 硬试官方+首个镜像也失败）：返回失败且旧库保留。"""
+    old = db_file.read_text(encoding="utf-8")
+    monkeypatch.setattr(threat_check, "runtime_dir", str(db_file.parent))
+    monkeypatch.setattr(threat_check, "_probe_candidates", lambda urls: [])
+
+    def boom(url, timeout=30):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr(threat_check, "_http_read", boom)
+    ok, msg = threat_check.update_intel(dest=str(db_file))
+    assert not ok
+    assert db_file.read_text(encoding="utf-8") == old  # 旧库不受影响
+    assert not (db_file.parent / "threat_db.json.tmp").exists()
+
+
+def test_update_intel_candidates_include_mirrors(monkeypatch):
+    """无 config 时候选 = 官方 + 全部镜像前缀拼接；自定义 db_url 只留单地址。"""
+    monkeypatch.setattr(threat_check, "runtime_dir", "X:/nope")
+    cands = threat_check._intel_candidates()
+    assert cands[0] == threat_check.GITHUB_INTEL_URL
+    assert len(cands) == 1 + len(threat_check.INTEL_MIRRORS)
+    assert all(c.startswith(m) for c, m in zip(cands[1:], threat_check.INTEL_MIRRORS))
