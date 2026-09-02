@@ -1,13 +1,13 @@
 {
-  "version": "1.7.3",
+  "version": "1.8.0",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.7.3/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.7.3/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.7.3/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.3/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.7.3/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe"
   ],
-  "md5": "41C14FFCCB9304D7A6A1516E21FB5CB7",
+  "md5": "9C07349C2D78782F4BC15A658A96B3BD",
   "release_note": "v1.7.3 修复更新（情报IOC命中表优化）：\n- 移除目标IP列（原多为DNS解析干扰），按 源IP+恶意域名(IOC) 去重聚合\n- 仅展示内网主机触发的IOC（过滤单位业务公网IP，如 124.235.x.x）\n- 修复后能清晰识别失陷终端：如 10.79.1.246 触发3家族恶意软件(XRed/挖矿/远控)、172.16.10.251 远控木马",
   "force_update": false
 }
