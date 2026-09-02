@@ -17,8 +17,9 @@ dependencies = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-# --cov：pytest 默认带覆盖率（配合下方 fail_under=50 门槛）
-addopts = "-q --cov"
+# --cov：pytest 默认带覆盖率（配合 fail_under=50 门槛）
+# 注意：显式列出模块，pytest-cov 7.x 单独写 --cov 时读不到 pyproject 的 [tool.coverage.run] source
+addopts = "-q --cov=main --cov=common --cov=updater --cov=ipdb --cov=report --cov=threat_check"
 
 [tool.coverage.run]
 # 覆盖率测量范围：5 个核心模块（main 为入口，体积小）

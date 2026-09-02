@@ -1,0 +1,36 @@
+name: threat-intel
+
+# 威胁情报库每日重建 + 发布（生产端上云，供日报 exe "更新情报库" 多端下载）
+#
+# 触发方式：
+#   1) workflow_dispatch：GitHub 网页 Actions 页手动点 "Run workflow"
+#      （demo/验证用，可指定任意分支）
+#   2) schedule：每日自动跑。注意：GitHub 的 schedule 只在【默认分支 main】
+#      上的 workflow 生效 —— 本文件合入 main 前不会每日自动触发。
+#      cron 用 UTC：30 0 * * * = 北京时间每日 08:30
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 0 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 下载 5 源重建威胁情报库
+        run: python tools/threat-intel/threat_db.py update
+
+      # 发布到固定 tag Release asset（供日报 exe 下载）
+      # Token：直接用 GitHub 自动注入的 GITHUB_TOKEN（无需配置 PAT secret）；
+      # upload_intel.py 会回退读取环境变量 GITHUB_TOKEN，配合上方 contents: write 即可上传 asset
+      - name: 发布到固定 tag Release asset（供日报 exe 下载）
+        run: python tools/threat-intel/upload_intel.py

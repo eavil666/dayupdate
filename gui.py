@@ -67,6 +67,9 @@ class DailyReportGUI:
         Button(title_frame, text="检查更新", command=self._check_update_manual, width=10, font=("宋体", 9)).pack(
             side="right"
         )
+        Button(title_frame, text="更新情报库", command=self._update_intel_manual, width=10, font=("宋体", 9)).pack(
+            side="right"
+        )
 
         # 文件选择区域
         file_frame = Frame(self.master, padx=10, pady=5)
@@ -443,6 +446,46 @@ class DailyReportGUI:
             messagebox.showwarning("提示", "值守日报文件不存在")
 
     # ---------------- 更新相关方法 ----------------
+    def _update_intel_manual(self):
+        """更新情报库按钮回调：确认后后台下载最新 threat_db.json，不卡界面"""
+        try:
+            if not messagebox.askyesno(
+                "更新情报库", "将从发布源下载最新威胁情报库（threat_db.json）覆盖本地，是否继续？"
+            ):
+                return
+            threading.Thread(target=self._run_intel_update, daemon=True).start()
+        except Exception as e:
+            import traceback
+
+            self._log(f"更新情报库启动失败: {e}\n{traceback.format_exc()}")
+
+    def _run_intel_update(self):
+        """在后台线程执行情报库下载（使用主线程安全回调反馈结果）"""
+        try:
+            from threat_check import intel_status, update_intel
+
+            self._log(f"[情报库] 当前: {intel_status().get('detail', '未知')}")
+            ok, msg = update_intel()
+            self._log(f"[情报库] {'✓ 更新成功' if ok else '✗ 更新失败'}: {msg}")
+            st = intel_status().get("detail", "") if ok else ""
+            if st:
+                self._log(f"[情报库] 生效: {st}")
+
+            def _show():
+                try:
+                    (messagebox.showinfo if ok else messagebox.showerror)(
+                        "情报库更新成功" if ok else "情报库更新失败",
+                        msg + (f"\n\n{st}" if st else ""),
+                    )
+                except Exception:
+                    pass
+
+            self.master.after(0, _show)
+        except Exception as e:
+            import traceback
+
+            self._log(f"[情报库] 更新异常: {e}\n{traceback.format_exc()}")
+
     def _check_update_manual(self):
         """手动检查更新按钮回调（强制弹窗）"""
         try:

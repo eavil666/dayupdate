@@ -10,6 +10,7 @@ env/
 *.egg-info/
 .eggs/
 .pytest_cache/
+.coverage
 .mypy_cache/
 .ruff_cache/
 
@@ -58,6 +59,10 @@ upx.exe
 # === 运行时缓存（IP 归属在线查询缓存，动态数据不入库）===
 geo_cache.json
 threat_feeds_cache.json
+# 本地威胁情报库（每日 8:30 自动刷新发布到 GitHub Release，exe 通过 --update-intel 拉取，不入 git）
+threat_db.json
+# tools/threat-intel 建库脚本的运行产物（data/db.json + data/raw/*），由 GitHub Actions 生成后直接发布，不入 git
+tools/threat-intel/data/
 
 # === WorkBuddy 项目记忆（本地工具数据，可能含 token 引用，不入库）===
 .workbuddy/

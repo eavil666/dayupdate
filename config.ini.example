@@ -36,3 +36,11 @@ ban_levels =
 #   \\\\file-server\\share\\report\\version.json
 # exe_urls =
 #   http://intranet-server/apps/report/daily-report-{version}.exe
+
+[intel]
+# 可选：威胁情报库（threat_db.json）下载地址。留空/删段则使用内置 GitHub 固定地址
+# （https://github.com/eavil666/dayupdate/releases/download/threat-intel-latest/threat_db.json）
+# 内网部署时可指向内网镜像/共享路径，例如：
+# db_url =
+#   http://intranet-server/apps/report/threat_db.json
+db_url =

@@ -549,7 +549,10 @@ def render(
     # 五、外网攻击研判与处置
     _add_heading(doc, "五、外网攻击研判与处置", 1)
     ext = stats["external"]
-    bad_ips, threat_sources = threat_data if threat_data else (set(), {})
+    # 威胁命中统一走 threat_check.match_ip（精确 IP + CIDR 恶意段）；
+    # 索引由 generate_daily_report 中的 load_bad_ips 完成初始化
+    from threat_check import match_ip as _threat_match  # noqa: F811
+
     threat_hits = []  # 命中公开威胁名单的源 IP（用于处置建议）
     if len(ext) > 0:
         grp = ext.groupby("攻击名称", sort=False).agg({"威胁等级": "first", "源IP": "count"}).reset_index()
@@ -557,14 +560,14 @@ def render(
         for idx, (_, row) in enumerate(grp.iterrows(), start=1):
             # 该攻击类型下的源 IP 集合
             type_ips = ext.loc[ext["攻击名称"] == row["攻击名称"], "源IP"].dropna().astype(str).tolist()
-            hit_ips = [ip for ip in type_ips if ip in bad_ips]
+            hit_ips = [ip for ip in type_ips if _threat_match(ip)]
             threat_txt = f"High×{len(hit_ips)}" if hit_ips else "—"
             ext_rows.append((idx, row["攻击名称"], f"{int(row['源IP'])} 起", threat_txt, "流量特征+情报比对", "已处置"))
         # 全部外网源 IP 中命中威胁名单的（去重）
         all_ext_ips = ext["源IP"].dropna().astype(str).unique().tolist()
         for ip in all_ext_ips:
-            if ip in bad_ips:
-                hits = threat_sources.get(ip, [])
+            hits = _threat_match(ip)
+            if hits:
                 threat_hits.append((ip, ",".join(hits)))
     else:
         ext_rows = [("（无外网告警）", "", "", "", "", "")]
@@ -595,7 +598,7 @@ def render(
         for idx, (_, row) in enumerate(grp.iterrows(), start=1):
             # 该攻击类型下的源 IP 集合（威胁名单匹配，口径与内网一致）
             type_ips = intdf.loc[intdf["攻击名称"] == row["攻击名称"], "源IP"].dropna().astype(str).tolist()
-            hit_ips = [ip for ip in type_ips if ip in bad_ips]
+            hit_ips = [ip for ip in type_ips if _threat_match(ip)]
             threat_txt = f"High×{len(hit_ips)}" if hit_ips else "—"
             int_rows.append((idx, row["攻击名称"], f"{int(row['源IP'])} 起", threat_txt, "流量特征+情报比对", "已处置"))
     else:
@@ -656,7 +659,7 @@ def render(
             # 目的归属为本地（如长春）→ 视为本地业务访问，不显示
             if any(g and g in _geo for g in _local_geos):
                 continue
-            if _dst in bad_ips:
+            if _threat_match(_dst):
                 _lvl = "High"
             elif int(_row["count"]) >= 3:
                 _lvl = "观察"
@@ -715,8 +718,9 @@ def render(
     else:
         _add_para(doc, "（无目的IP数据）")
     # ③ 情报IOC命中（告警"情报IOC"列有值的，情报平台实锤）
+    # 注意：该列为可选列（仅当天存在情报类告警文件时 load_data 才建），缺失时置空表走无命中分支
     _add_heading(doc, "3. 情报IOC命中", 2)
-    _ioc = df[df["情报IOC"].notna()].copy()
+    _ioc = df[df["情报IOC"].notna()].copy() if "情报IOC" in df.columns else df.iloc[0:0].copy()
     if len(_ioc) > 0:
         _ioc = _ioc[_ioc["情报IOC"].astype(str).str.strip() != ""]
     # 仅展示内网主机触发的 IOC（源 IP 私网），过滤业务公网 IP/单位出口资产
@@ -934,16 +938,20 @@ def generate_daily_report(files, date, work_summary=None, follow_items=None, int
     _log(
         f"[+] 总告警 {stats['total']} | 内网 {stats['int_count']} | 外网 {stats['ext_count']} | 处置 {stats['ban_count']}"
     )
-    # 威胁名单（threat_check：磁盘缓存 6h，失败降级空集，不阻塞日报）
+    # 威胁名单（本地情报库优先：threat_db.json 精确+恶意段命中；缺失时联网 3 源兜底；均失败空集不阻塞日报）
     threat_data = (set(), {})
     try:
-        from threat_check import load_bad_ips
+        from threat_check import intel_status, load_bad_ips
 
         _cache_file = Path(runtime_dir) / "threat_feeds_cache.json"
         bad_ips, sources = load_bad_ips(str(_cache_file))
         if bad_ips:
             threat_data = (bad_ips, sources)
-            _log(f"[+] 威胁名单加载: {len(bad_ips)} 条（用于外网研判分级）")
+        _st = intel_status()
+        if _st.get("mode") == "db":
+            _log(f"[+] 情报库生效: {_st['detail']}（威胁源分级支持精确IP+恶意段命中）")
+        elif _st.get("mode") == "legacy" and bad_ips:
+            _log(f"[+] 威胁名单（联网兜底 3 源）: {len(bad_ips)} 条")
         else:
             _log("[!] 威胁名单为空，外网研判表威胁源分级显示 —")
     except Exception as _e:

@@ -164,8 +164,9 @@ def main():
     """
     主入口（按优先级判断模式）:
       1) --update-worker=<jsonPath>   纯后台覆盖模式（优先级最高，绝不加载GUI）
-      2) -c / --cli                   命令行模式
-      3) 默认                          GUI 模式
+      2) --update-intel               更新威胁情报库后退出（不进入日报流程）
+      3) -c / --cli                   命令行模式
+      4) 默认                          GUI 模式
     """
     for arg in sys.argv[1:]:
         if arg.startswith("--update-worker="):
@@ -185,6 +186,18 @@ def main():
                     pass
                 _rc = 99
             sys.exit(_rc)
+    if "--update-intel" in sys.argv:
+        # 更新威胁情报库（threat_db.json，默认从 GitHub 固定地址下载）
+        from threat_check import intel_status, update_intel
+
+        print("=" * 60)
+        print("更新威胁情报库")
+        print("=" * 60)
+        _before = intel_status().get("detail", "")
+        print(f"[*] 当前: {_before}")
+        ok, msg = update_intel()
+        print(f"[{'OK' if ok else 'FAIL'}] {msg}")
+        sys.exit(0 if ok else 1)
     if "-c" in sys.argv or "--cli" in sys.argv:
         cli_main()
     else:
