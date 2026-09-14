@@ -144,19 +144,19 @@ def build_exe():
     dist_dir = os.path.join(script_dir, "dist")
     build_dir = os.path.join(script_dir, "build")
 
-    # 清理旧产物
+    # 清理旧产物（尽力而为：删不掉不阻断，PyInstaller 会覆盖同名文件）
     if os.path.exists(dist_dir):
         for f in os.listdir(dist_dir):
             if f.endswith(".exe"):
                 try:
                     os.remove(os.path.join(dist_dir, f))
-                except PermissionError:
-                    pass
+                except OSError as e:
+                    print(f"[!] 旧 exe 删除失败（忽略，将由打包覆盖）: {f} ({e})")
     if os.path.exists(build_dir):
         try:
             shutil.rmtree(build_dir)
-        except PermissionError:
-            pass
+        except OSError as e:
+            print(f"[!] 旧 build 目录清理失败（忽略，将由打包覆盖）: {e}")
 
     # 创建运行时 hook
     runtime_hook_file = create_runtime_hook()
@@ -220,7 +220,11 @@ a = Analysis(
     hooksconfig={{}},
     runtime_hooks=[r'{rth}'],
     excludes=[
-        'matplotlib', 'scipy', 'PIL', 'Pillow',
+        # 注意：不要把 'PIL'/'Pillow' 放进 excludes —— report.py 的图表
+        # （威胁等级分布 / 攻击类型分布）依赖 PIL 手绘，excludes 优先级高于
+        # hiddenimports，一旦排除会导致 exe 内 from PIL import ... 抛 ImportError，
+        # 图表被静默跳过（本地源码运行正常、exe 缺图）。
+        'matplotlib', 'scipy',
         'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
         'IPython', 'jupyter', 'notebook', 'pytest', 'nose', 'tox',
         'sklearn', 'statsmodels', 'seaborn', 'plotly', 'bokeh', 'altair',

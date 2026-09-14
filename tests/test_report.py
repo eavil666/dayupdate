@@ -57,6 +57,40 @@ def test_analyze_no_external():
     assert stats["int_level"]["高危"] == 1
 
 
+def test_analyze_nat_forward():
+    """analyze：转发地址(NAT)单列统计，不计入外网攻击源/封禁数"""
+    df = pd.DataFrame(
+        {
+            "源IP": ["11.11.11.2", "11.11.11.2", "1.2.3.4"],
+            "目的IP": ["10.0.0.1", "10.0.0.2", "10.0.0.1"],
+            "攻击名称": ["端口扫描", "端口扫描", "漏洞利用"],
+            "威胁等级": ["高危", "高危", "严重"],
+            "网络类型": ["转发", "转发", "外网"],
+        }
+    )
+    stats = analyze(df)
+    assert stats["nat_count"] == 2
+    assert stats["ext_count"] == 1  # 转发地址不计入外网
+    assert stats["total"] == 3  # 但计入总量
+    assert stats["nat_top"] == [("11.11.11.2", 2)]
+    assert stats["ban_count"] == 1  # 仅真实外网源计入
+    assert stats["ext_level"]["高危"] == 0  # 转发地址不污染外网等级分布
+
+
+def test_classify_forward_ip(monkeypatch):
+    """classify：命中转发清单的 IP 判为"转发"而非"外网" """
+    import ipaddress
+
+    conf = _conf()
+    monkeypatch.setattr(report, "is_forward_ip", lambda ip: False)
+    assert report.classify("11.11.11.2", "", "", conf) == "外网"
+    monkeypatch.setattr(
+        report, "is_forward_ip", lambda ip: ipaddress.ip_address(str(ip)) in ipaddress.ip_network("11.11.11.0/24")
+    )
+    assert report.classify("11.11.11.2", "", "", conf) == "转发"
+    assert report.classify("1.2.3.4", "", "", conf) == "外网"
+
+
 def test_load_single_file_column_mapping(tmp_path):
     """load_single_file：列名映射（含前导空格）+ 网络类型判定"""
     alert = tmp_path / "alerts.xlsx"

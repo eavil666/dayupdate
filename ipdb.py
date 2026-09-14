@@ -148,6 +148,179 @@ def _auto_load_excluded_ips():
     load_external_excluded_ips()
 
 
+# ---------------- 转发地址（NAT）识别 ----------------
+# 场景：防火墙上做地址转发（NAT）且链路未启用 X-Forwarded-For 时，安全设备
+# 日志里的"源 IP"记录的是 NAT 转换后的转发地址，真实攻击源被掩盖。
+# 这类地址若计入攻击源统计，会把"多源扫描"误判为"单源猛攻"，研判方向失真。
+# 因此单独识别、单独说明，不计入外网攻击源、不作为封禁依据。
+FORWARD_IP_NETWORKS = []  # 转发地址清单（ip_address / ip_network）
+FORWARD_IP_LABELS = {}  # IP -> 说明（来自 业务ip.xlsx）
+_AUTO_FORWARD_LOADED = False
+
+
+def _forward_spec_to_networks(spec):
+    """把配置项解析为 ip_address / ip_network 列表。
+
+    支持：单 IP、CIDR（11.11.11.0/24）、范围（11.11.11.2-11.11.11.9 或简写 11.11.11.2-9）。
+    """
+    spec = str(spec).strip()
+    if not spec:
+        return []
+    if "/" in spec:
+        try:
+            return [ipaddress.ip_network(spec, strict=False)]
+        except ValueError:
+            _log(f"[!] 跳过无效转发地址网段: {spec}")
+            return []
+    if "-" in spec:
+        ips = _parse_ip_range(spec)
+        if not ips:
+            return []
+        try:
+            start_ip = ipaddress.ip_address(ips[0])
+            end_ip = ipaddress.ip_address(ips[-1])
+            return list(ipaddress.summarize_address_range(start_ip, end_ip))
+        except ValueError:
+            return []
+    try:
+        return [ipaddress.ip_address(spec)]
+    except ValueError:
+        _log(f"[!] 跳过无效转发地址: {spec}")
+        return []
+
+
+def _load_forward_from_excel(excel_path=None):
+    """从 业务ip.xlsx 的"转发地址"sheet 读取（列：IP | 说明）。
+
+    sheet 名模糊匹配（含"转发"即可，如 转发地址 / 地址转发 / NAT转发）。
+    无该 sheet 返回 0。
+    """
+    global FORWARD_IP_NETWORKS, FORWARD_IP_LABELS
+    if excel_path is None:
+        excel_path = _find_file("业务ip.xlsx")
+    if not excel_path or not os.path.exists(excel_path):
+        return 0
+    try:
+        import pandas as pd
+
+        xl = pd.ExcelFile(excel_path)
+        sheet = next((s for s in xl.sheet_names if "转发" in s), None)
+        if not sheet:
+            return 0
+        df = pd.read_excel(excel_path, sheet_name=sheet)
+        df.columns = df.columns.str.strip()
+        ip_col = None
+        label_col = None
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if "ip" in col_lower and ip_col is None:
+                ip_col = col
+            elif "说明" in str(col) or "备注" in str(col) or "desc" in col_lower:
+                label_col = col
+        if ip_col is None:
+            ip_col = df.columns[0]
+            if label_col is None and len(df.columns) > 1:
+                label_col = df.columns[1]
+        count = 0
+        for _, row in df.iterrows():
+            if pd.isna(row[ip_col]):
+                continue
+            spec = str(row[ip_col]).strip()
+            label = (
+                str(row[label_col]).strip() if label_col is not None and not pd.isna(row[label_col]) else "防火墙地址转发"
+            )
+            nets = _forward_spec_to_networks(spec)
+            if not nets:
+                continue
+            FORWARD_IP_NETWORKS.extend(nets)
+            for net in nets:
+                FORWARD_IP_LABELS[str(net)] = label
+            count += 1
+        _log(f"[+] 从业务ip.xlsx[{sheet}]加载转发地址: {count} 条")
+        return count
+    except Exception as e:
+        _log(f"[!] 读取转发地址sheet失败: {e}")
+        return 0
+
+
+def _load_forward_from_config(config_path=None):
+    """从 config.ini [network] forward_ips 读取转发地址（多行，支持逗号分隔）"""
+    global FORWARD_IP_NETWORKS, FORWARD_IP_LABELS
+    if config_path is None:
+        config_path = os.path.join(runtime_dir, "config.ini")
+    if not os.path.exists(config_path):
+        return 0
+    try:
+        cfg = configparser.ConfigParser()
+        cfg.read(config_path, encoding="utf-8")
+        raw = cfg.get("network", "forward_ips", fallback="")
+    except Exception:
+        return 0
+    count = 0
+    for line in raw.splitlines():
+        for item in line.split(","):
+            spec = item.strip()
+            if not spec or spec.startswith("#"):
+                continue
+            nets = _forward_spec_to_networks(spec)
+            if not nets:
+                continue
+            FORWARD_IP_NETWORKS.extend(nets)
+            for net in nets:
+                FORWARD_IP_LABELS.setdefault(str(net), "防火墙地址转发")
+            count += 1
+    return count
+
+
+def load_forward_ips(excel_path=None):
+    """加载转发地址清单：业务ip.xlsx[转发地址] sheet 优先，config [network] forward_ips 合并。
+
+    幂等（仅首次生效），避免重复 append。
+    """
+    global _AUTO_FORWARD_LOADED
+    if _AUTO_FORWARD_LOADED:
+        return len(FORWARD_IP_NETWORKS)
+    _AUTO_FORWARD_LOADED = True
+    n_excel = _load_forward_from_excel(excel_path)
+    n_cfg = _load_forward_from_config()
+    if FORWARD_IP_NETWORKS:
+        _log(f"[+] 转发地址(NAT)清单生效: {len(FORWARD_IP_NETWORKS)} 条（Excel {n_excel} / config {n_cfg}）")
+    return len(FORWARD_IP_NETWORKS)
+
+
+def is_forward_ip(ip_str):
+    """判断 IP 是否属于"防火墙地址转发（NAT）"清单"""
+    try:
+        ip = ipaddress.ip_address(str(ip_str).strip())
+    except ValueError:
+        return False
+    for net in FORWARD_IP_NETWORKS:
+        if isinstance(net, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            if ip == net:
+                return True
+        elif ip.version == net.version and ip in net:
+            return True
+    return False
+
+
+def forward_ip_label(ip_str):
+    """取转发地址的说明标签（支持单 IP 精确匹配与网段归属匹配）"""
+    ip_s = str(ip_str).strip()
+    if ip_s in FORWARD_IP_LABELS:
+        return FORWARD_IP_LABELS[ip_s]
+    try:
+        ip = ipaddress.ip_address(ip_s)
+    except ValueError:
+        return "防火墙地址转发"
+    for net in FORWARD_IP_NETWORKS:
+        if isinstance(net, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+            if ip == net:
+                return FORWARD_IP_LABELS.get(str(net), "防火墙地址转发")
+        elif ip.version == net.version and ip in net:
+            return FORWARD_IP_LABELS.get(str(net), "防火墙地址转发")
+    return "防火墙地址转发"
+
+
 def extract_zones_from_alerts(files):
     """从安全告警文件的"源区域"列提取内网区域集合（自动发现，解放 config internal_zones）。
 
@@ -742,7 +915,7 @@ def extract_source_ips(file_path):
             dst_ip_col = col
     if not src_ip_col or not dst_ip_col:
         _log(f"[!] 无法找到必需的列，文件: {file_path}")
-        return [], [], []
+        return [], [], [], {}
     df = df.rename(columns={src_ip_col: "源 IP", dst_ip_col: "目标 IP"})
     # 分离已排除IP（本地公网IP）和待分析IP
     excluded_mask = df["源 IP"].apply(is_excluded_ip)
@@ -750,6 +923,14 @@ def extract_source_ips(file_path):
     df = df[~excluded_mask]
     # 收集被排除的源IP（去重）
     excluded_ips = excluded_df["源 IP"].drop_duplicates().tolist() if len(excluded_df) > 0 else []
+    # 转发地址（NAT）：源 IP 为防火墙地址转发时真实源被掩盖，不计入外网攻击源，
+    # 单独统计（IP -> 告警条数）供归属表单列说明。
+    forward_ips = {}
+    forward_mask = df["源 IP"].apply(is_forward_ip)
+    if bool(forward_mask.any()):
+        forward_df = df[forward_mask]
+        forward_ips = {str(k): int(v) for k, v in forward_df["源 IP"].astype(str).value_counts().items()}
+        df = df[~forward_mask]
 
     def get_ip_type(ip_str):
         try:
@@ -783,7 +964,7 @@ def extract_source_ips(file_path):
     internal_ips = []
     if len(internal_df) > 0:
         internal_ips = internal_df["源 IP"].drop_duplicates().tolist()
-    return external_ips, internal_ips, excluded_ips
+    return external_ips, internal_ips, excluded_ips, forward_ips
 
 
 def load_config(files=None, local_geos=None):
@@ -798,6 +979,8 @@ def load_config(files=None, local_geos=None):
     """
     # 排除IP：业务ip.xlsx 自动加载（幂等，config 的 excluded_ips 已不再需要）
     _auto_load_excluded_ips()
+    # 转发地址（NAT）：业务ip.xlsx[转发地址] sheet + config [network] forward_ips（幂等）
+    load_forward_ips()
 
     cfg = configparser.ConfigParser()
     # 优先从exe目录读取，其次从临时解压目录；缺失时全部回退默认值（不崩溃）
@@ -876,22 +1059,30 @@ def load_config(files=None, local_geos=None):
 
 
 def generate_ip_report(files, date, local_geos=None):
+    # 转发地址清单（NAT）：业务ip.xlsx/config 加载（幂等），用于源 IP 分流
+    load_forward_ips()
     all_external_ips = set()
     all_internal_ips = set()
     all_excluded_ips = set()
+    all_forward_ips = {}  # 转发地址 -> 告警条数
     for f in files:
         _log(f"[+] 处理文件: {f.name}")
         file_path = str(f)
-        external_ips, internal_ips, excluded_ips = extract_source_ips(file_path)
+        external_ips, internal_ips, excluded_ips, forward_ips = extract_source_ips(file_path)
         all_external_ips.update(external_ips)
         all_internal_ips.update(internal_ips)
         all_excluded_ips.update(excluded_ips)
+        for _ip, _n in forward_ips.items():
+            all_forward_ips[_ip] = all_forward_ips.get(_ip, 0) + _n
     _log(f"[+] 外网攻击IP去重后共 {len(all_external_ips)} 个，开始查询归属地...")
     _log(f"[+] 内网IP去重后共 {len(all_internal_ips)} 个，开始查询归属地...")
     _log(f"[+] 本地公网IP(已排除)去重后共 {len(all_excluded_ips)} 个")
+    if all_forward_ips:
+        _log(f"[+] 地址转发IP(NAT，不计入攻击源)去重后共 {len(all_forward_ips)} 个")
     external_ip_list = list(all_external_ips)
     internal_ip_list = list(all_internal_ips)
     excluded_ip_list = list(all_excluded_ips)
+    forward_ip_list = [ip for ip, _ in sorted(all_forward_ips.items(), key=lambda x: -x[1])]
     location_map = query_all_ips(external_ip_list)
     # 威胁分级：与日报同口径走 threat_check.match_ip（精确 IP + CIDR 恶意段命中）。
     # load_bad_ips 负责初始化命中索引（本地 threat_db.json 优先，联网 3 源兜底），
@@ -916,6 +1107,8 @@ def generate_ip_report(files, date, local_geos=None):
         bad_ips, _threat_sources, _match_ip = set(), {}, None
     # 查询排除IP的归属地
     excluded_location_map = query_all_ips(excluded_ip_list) if excluded_ip_list else {}
+    # 查询转发地址的归属地（仅用于说明展示，不参与攻击源统计）
+    forward_location_map = query_all_ips(forward_ip_list) if forward_ip_list else {}
     load_terminal_ip_table()
     # 加载 local_geos 配置用于标记本地IP（传入 files 自动从告警提取区域/归属地；local_geos 为 GUI 自定义）
     try:
@@ -1041,6 +1234,42 @@ def generate_ip_report(files, date, local_geos=None):
         ws3.column_dimensions["B"].width = 18
         ws3.column_dimensions["C"].width = 40
         ws3.column_dimensions["D"].width = 22
+    # 第四 sheet：转发地址(NAT) —— 源地址为防火墙地址转发，真实源被 NAT 掩盖，
+    # 不计入"外网攻击IP归属"统计，避免被误读为单源集中攻击。
+    if forward_ip_list:
+        ws4 = wb.create_sheet("转发地址(NAT)")
+        headers4 = ["序号", "IP地址", "归属地", "告警条数", "说明"]
+        ws4.append(headers4)
+        for cell in ws4[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = thin_border
+        nat_fill = PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid")
+        for idx, ip in enumerate(forward_ip_list, start=1):
+            location, _, _ = forward_location_map.get(ip, ("未知", "未知", "未知"))
+            _label = forward_ip_label(ip)
+            ws4.append(
+                [
+                    idx,
+                    ip,
+                    location,
+                    all_forward_ips.get(ip, 0),
+                    f"{_label}（未启用 X-Forwarded-For，真实源被 NAT 掩盖，需从防火墙会话表回溯）",
+                ]
+            )
+            for col in range(1, 6):
+                ws4.cell(row=idx + 1, column=col).border = thin_border
+                ws4.cell(row=idx + 1, column=col).fill = nat_fill
+            ws4.cell(row=idx + 1, column=1).alignment = Alignment(horizontal="center", vertical="center")
+            ws4.cell(row=idx + 1, column=2).alignment = Alignment(horizontal="left", vertical="center")
+            ws4.cell(row=idx + 1, column=3).alignment = Alignment(wrap_text=True, vertical="center")
+            ws4.cell(row=idx + 1, column=4).alignment = Alignment(horizontal="center", vertical="center")
+            ws4.cell(row=idx + 1, column=5).alignment = Alignment(wrap_text=True, vertical="center")
+        ws4.column_dimensions["A"].width = 8
+        ws4.column_dimensions["B"].width = 18
+        ws4.column_dimensions["C"].width = 40
+        ws4.column_dimensions["D"].width = 12
+        ws4.column_dimensions["E"].width = 56
     try:
         wb.save(output_file)
     except PermissionError:

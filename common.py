@@ -62,6 +62,29 @@ def _append_log_file(msg, level=INFO):
         pass
 
 
+def _safe_console_write(text):
+    """向控制台写日志行，编码不兼容时降级替换，绝不因日志中断主流程。
+
+    Windows 中文环境下 stdout 通常是 GBK，日志中的 ✓ / → 等符号会触发
+    UnicodeEncodeError 并让整个流程崩溃（exe 在管道/重定向场景尤其隐蔽）。
+    """
+    stream = sys.stdout
+    if stream is None:  # 打包后 console=False 且无控制台可写
+        return
+    try:
+        stream.write(text + "\n")
+        stream.flush()
+    except UnicodeEncodeError:
+        try:
+            enc = getattr(stream, "encoding", None) or "utf-8"
+            stream.write(text.encode(enc, "replace").decode(enc, "replace") + "\n")
+            stream.flush()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _log(msg, level=INFO):
     """统一日志：时间戳 + 级别 + 文件（app.log）+ GUI/控制台。
 
@@ -73,7 +96,7 @@ def _log(msg, level=INFO):
     if _gui_log_callback:
         _gui_log_callback(msg)
     else:
-        print(f"[{datetime.now():%H:%M:%S}] [{level}] {msg}", flush=True)
+        _safe_console_write(f"[{datetime.now():%H:%M:%S}] [{level}] {msg}")
 
 
 def _set_progress(value, maximum=None):

@@ -127,7 +127,9 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 | 文件 | 作用 |
 |---|---|
 | `config.ini` | 运行时配置（更新源、情报库 URL 等） |
-| `业务ip.xlsx`（`探针ip段` sheet） | 业务/探针 IP 段 → 告警过滤排除 |
+| `业务ip.xlsx`（`业务ip段` sheet） | 单位公网/业务地址 → 告警过滤排除 |
+| `业务ip.xlsx`（`探针ip段` sheet） | 业务/探针 IP 段 → 资产健康检查探针清单 |
+| `业务ip.xlsx`（`转发地址` sheet） | **防火墙地址转发（NAT）地址** → 不计入外网攻击源（见下） |
 | `终端ip地址表.xlsx` | 终端 IP 归属表（GUI 可手动导入） |
 | `安全告警*.xlsx` | 输入告警数据（自动探测） |
 | `data/db.json` 或 `threat_db.json` | 本地威胁情报库（运行时生成/下载，不入库） |
@@ -135,6 +137,14 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 | `.github/workflows/threat-intel.yml` | 云端每日建库+发布（cron `30 0 * * *` = 北京 08:30） |
 
 > 项目约定：业务配置走 Excel、规避 `config.ini`；单数据源生成脚本（改一处全篇生效）；生成物/中间产物不入 git。
+
+### 转发地址（NAT）口径说明
+
+防火墙上做地址转发（NAT）且链路未启用 `X-Forwarded-For` 时，安全设备日志里的"源 IP"记录的是 **NAT 转换后的转发地址**，真实攻击源被掩盖。这类地址若计入攻击源统计，会把"多源扫描"误判为"单源猛攻"，研判方向失真。
+
+- **配置**：`业务ip.xlsx` → `转发地址` sheet（列：`IP` / `说明`），支持单 IP、CIDR（`11.11.11.0/24`）、范围（`11.11.11.2-9`）；`config.ini [network] forward_ips` 可作兜底。
+- **效果**：命中清单的源 IP 判为"转发"，单列统计，**不计入外网攻击源、不参与封禁建议、不进入重点事件**；日报概览、第五节说明、研判结论、待跟进事项均给出"真实源被 NAT 掩盖、需从防火墙会话表回溯"的正确口径；IP 归属表新增 `转发地址(NAT)` sheet 单独列示。
+
 
 ---
 

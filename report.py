@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from common import _log, runtime_dir
-from ipdb import is_excluded_ip, is_private_ip, load_config
+from ipdb import is_excluded_ip, is_forward_ip, is_private_ip, load_config
 
 
 def classify(ip, zone, geo, conf):
@@ -22,6 +22,10 @@ def classify(ip, zone, geo, conf):
         addr = ipaddress.ip_address(str(ip).strip())
     except ValueError:
         return "未知"
+    # 转发地址（NAT）优先：防火墙做过地址转发且未启用 X-Forwarded-For 时，
+    # 日志源 IP 是转发后的地址，真实源被掩盖 → 不能按攻击源归入"外网"。
+    if is_forward_ip(ip):
+        return "转发"
     for net in conf["nets"]:
         if addr in net:
             return "内网"
@@ -111,6 +115,9 @@ def analyze(df):
     total = len(df)
     internal = df[df["网络类型"] == "内网"]
     external = df[df["网络类型"] == "外网"]
+    # 转发地址（NAT）单列：源 IP 为防火墙地址转发，真实源被掩盖，
+    # 不计入外网攻击源统计、不参与攻击源研判与封禁建议。
+    nat = df[df["网络类型"] == "转发"]
 
     def by_level(sub):
         return {lv: int((sub["威胁等级"] == lv).sum()) for lv in LEVELS}
@@ -121,12 +128,19 @@ def analyze(df):
         external_to_internal = external[external["目的IP"].apply(is_private_ip)]
     external_to_internal = external_to_internal[~external_to_internal["源IP"].apply(is_excluded_ip)]
     ban_count = int(external_to_internal["源IP"].nunique()) if len(external_to_internal) > 0 else 0
+    # 转发地址去重源 IP（按告警条数降序），用于报告说明
+    nat_top = []
+    if len(nat) > 0 and "源IP" in nat.columns:
+        nat_top = [(str(k), int(v)) for k, v in nat["源IP"].astype(str).value_counts().items()]
     return {
         "total": total,
         "internal": internal,
         "external": external,
+        "nat": nat,
         "int_count": len(internal),
         "ext_count": len(external),
+        "nat_count": len(nat),
+        "nat_top": nat_top,
         "int_level": by_level(internal),
         "ext_level": by_level(external),
         "ban_count": ban_count,
@@ -382,7 +396,9 @@ def _render_level_chart(stats, save_path):
 
         img.save(save_path)
         return save_path
-    except Exception:
+    except Exception as e:
+        # 真实失败才输出（如 exe 未打包 PIL），便于定位"图表缺失"类问题
+        _log(f"[!] 威胁等级分布图渲染失败，已跳过: {e!r}")
         return None
 
 
@@ -445,7 +461,9 @@ def _render_attack_chart(attack_df, save_path, title=None, color="#C00000"):
 
         img.save(save_path)
         return save_path
-    except Exception:
+    except Exception as e:
+        # 真实失败才输出（如 exe 未打包 PIL），便于定位"图表缺失"类问题
+        _log(f"[!] 攻击类型分布图渲染失败，已跳过: {e!r}")
         return None
 
 
@@ -500,11 +518,18 @@ def render(
     # 一、当日态势概览与重点工作总结
     _add_heading(doc, "一、当日态势概览与重点工作总结", 1)
     total = max(stats["total"], 1)
+    _nat_n = stats.get("nat_count", 0)
     auto_summary = (
         f"今日共捕获告警 {stats['total']} 起，其中内网 {stats['int_count']} 起"
         f"（{stats['int_count'] / total * 100:.1f}%），外网 {stats['ext_count']} 起"
-        f"（{stats['ext_count'] / total * 100:.1f}%），累计处置 IP {stats['ban_count']} 个。"
+        f"（{stats['ext_count'] / total * 100:.1f}%）"
     )
+    if _nat_n:
+        auto_summary += (
+            f"，防火墙地址转发（NAT）{_nat_n} 起（{_nat_n / total * 100:.1f}%，"
+            f"真实源被转发地址掩盖，不计入外网攻击源）"
+        )
+    auto_summary += f"，累计处置 IP {stats['ban_count']} 个。"
     _add_para(doc, f"1. {auto_summary}")
     work_items = _parse_lines(work_summary)
     _add_numbered_list(doc, work_items, start=2)
@@ -592,6 +617,17 @@ def render(
         [41, 173, 51, 71, 106, 41],
         ext_rows,
     )
+    # 转发地址（NAT）说明：源 IP 为防火墙地址转发的告警，真实源被掩盖，
+    # 不计入上表攻击源统计，也不能作为封禁依据（封禁转发地址本身无意义）。
+    _nat_top = stats.get("nat_top") or []
+    if _nat_top:
+        _nat_ips_txt = "、".join(f"{ip}（{n} 起）" for ip, n in _nat_top[:3])
+        _add_para(
+            doc,
+            f"说明：另有 {stats.get('nat_count', 0)} 起告警的源地址为防火墙地址转发 IP（{_nat_ips_txt}）。"
+            f"该链路未启用 X-Forwarded-For，日志记录的是 NAT 转换后的地址，真实攻击源被掩盖，"
+            f"故不计入上表外网攻击源统计，亦不作为封禁依据；真实源需通过防火墙会话表回溯。",
+        )
     # 攻击类型分布图（PIL 横向条形图，失败静默跳过）
     _attack_chart = _render_attack_chart(ext, os.path.join(tempfile.gettempdir(), f"attack_chart_{date}.png"))
     if _attack_chart:
@@ -771,6 +807,9 @@ def render(
     # 八、重点事件研判
     _add_heading(doc, "八、重点事件研判", 1)
     key = df[df["威胁等级"].isin(conf["crit_levels"])].copy()
+    # 转发地址（NAT）不计入重点事件：源址并非真实攻击源，列入会误导研判方向
+    if "网络类型" in key.columns:
+        key = key[key["网络类型"] != "转发"]
     if len(key) > 0:
         key["_p"] = key["威胁等级"].map({lv: i for i, lv in enumerate(LEVELS)})
         key = key.sort_values("_p")
@@ -785,7 +824,8 @@ def render(
         _add_table(doc, ["序号", "事件名称", "源地址", "攻击次数"], [41, 145, 135, 121], key_rows)
     else:
         _add_para(doc, "今日无严重/高危级事件。")
-    # 自动研判结论（结合威胁分级）
+    # 自动研判结论（结合威胁分级；转发地址单独说明，不按攻击源口径研判）
+    _nat_n = stats.get("nat_count", 0)
     if len(ext) > 0:
         top_att = ext["攻击名称"].value_counts().head(1)
         att_name = top_att.index[0] if len(top_att) else ""
@@ -803,6 +843,13 @@ def render(
                 f"源 IP 均未命中公开威胁名单，判定为常规扫描探测，已按流程处置，持续观察。"
             )
         _add_para(doc, conclusion)
+    elif _nat_n:
+        _add_para(
+            doc,
+            f"研判结论：今日外网告警中 {_nat_n} 起源址为防火墙地址转发 IP，真实攻击源被 NAT 掩盖，"
+            f"无法直接归因，不宜按「单源猛攻」研判；建议通过防火墙会话表回溯真实源，"
+            f"并在边界启用 X-Forwarded-For 记录后另行分析。",
+        )
 
     # 九、情报动态
     _add_heading(doc, "九、情报动态", 1)

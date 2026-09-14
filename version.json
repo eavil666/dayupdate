@@ -1,13 +1,13 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.0/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.8.1/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.1/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.1/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.1/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.1/daily-report.exe"
   ],
-  "md5": "9C07349C2D78782F4BC15A658A96B3BD",
-  "release_note": "v1.7.3 修复更新（情报IOC命中表优化）：\n- 移除目标IP列（原多为DNS解析干扰），按 源IP+恶意域名(IOC) 去重聚合\n- 仅展示内网主机触发的IOC（过滤单位业务公网IP，如 124.235.x.x）\n- 修复后能清晰识别失陷终端：如 10.79.1.246 触发3家族恶意软件(XRed/挖矿/远控)、172.16.10.251 远控木马",
+  "md5": "CE340CC7DFDFCDF0B00CFAB01CBF4FB7",
+  "release_note": "v1.8.1 修复更新：\n- 修复 exe 版日报图表缺失：打包配置误将 PIL 列入 excludes，导致威胁等级分布/攻击类型图表从未生成（本地源码正常）；本次已修正并补齐 PIL 图像组件\n- 修复特殊符号日志在 GBK 控制台下导致程序中断的问题，日志输出改为编码安全降级\n- 修正 NAT 转发地址研判口径：防火墙地址转发 IP 不再计入外网攻击源，避免聚合成「单源集中」假象\n- 打包清理逻辑加固，旧产物删除失败不再中断构建",
   "force_update": false
 }

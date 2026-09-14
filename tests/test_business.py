@@ -213,13 +213,14 @@ def test_load_config_custom_geos(tmp_path, monkeypatch):
 
 
 def test_extract_source_ips(tmp_path, monkeypatch):
-    """extract_source_ips：从告警 Excel 提取外网/内网/排除 IP（去重）"""
+    """extract_source_ips：从告警 Excel 提取外网/内网/排除/转发 IP（去重）"""
     import pandas as pd
 
     import ipdb
 
     # 排除 IP 隔离：清空模块级（避免真实 config/业务ip 干扰）
     monkeypatch.setattr(ipdb, "EXCLUDED_IP_NETWORKS", [])
+    monkeypatch.setattr(ipdb, "FORWARD_IP_NETWORKS", [])
     alert = tmp_path / "alerts_src.xlsx"
     pd.DataFrame(
         {
@@ -227,11 +228,33 @@ def test_extract_source_ips(tmp_path, monkeypatch):
             "目标 IP": ["10.0.0.2", "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5"],
         }
     ).to_excel(alert, index=False)
-    external, internal, excluded = ipdb.extract_source_ips(str(alert))
+    external, internal, excluded, forward = ipdb.extract_source_ips(str(alert))
     assert "1.2.3.4" in external and "8.8.8.8" in external
     assert external.count("1.2.3.4") == 1  # 去重
     assert "10.0.0.1" in internal
     assert excluded == []  # 无排除 IP
+    assert forward == {}  # 无转发地址
+
+
+def test_extract_source_ips_forward_nat(tmp_path, monkeypatch):
+    """转发地址(NAT)：源 IP 命中转发清单 → 不计入外网源，单独返回 IP->条数"""
+    import pandas as pd
+
+    import ipdb
+
+    monkeypatch.setattr(ipdb, "EXCLUDED_IP_NETWORKS", [])
+    monkeypatch.setattr(ipdb, "FORWARD_IP_NETWORKS", [ipaddress.ip_network("11.11.11.0/24")])
+    alert = tmp_path / "alerts_nat.xlsx"
+    pd.DataFrame(
+        {
+            "源 IP": ["11.11.11.2", "11.11.11.2", "11.11.11.9", "1.2.3.4"],
+            "目标 IP": ["10.0.0.2", "10.0.0.2", "10.0.0.3", "10.0.0.4"],
+        }
+    ).to_excel(alert, index=False)
+    external, internal, excluded, forward = ipdb.extract_source_ips(str(alert))
+    assert "11.11.11.2" not in external and "11.11.11.9" not in external
+    assert "1.2.3.4" in external
+    assert forward == {"11.11.11.2": 2, "11.11.11.9": 1}
 
 
 def test_extract_source_ips_missing_cols(tmp_path):
@@ -242,7 +265,7 @@ def test_extract_source_ips_missing_cols(tmp_path):
 
     alert = tmp_path / "bad_cols.xlsx"
     pd.DataFrame({"名称": ["x"], "值": [1]}).to_excel(alert, index=False)
-    assert ipdb.extract_source_ips(str(alert)) == ([], [], [])
+    assert ipdb.extract_source_ips(str(alert)) == ([], [], [], {})
 
 
 def test_query_all_ips_offline(tmp_path, monkeypatch):
