@@ -257,6 +257,36 @@ def test_extract_source_ips_forward_nat(tmp_path, monkeypatch):
     assert forward == {"11.11.11.2": 2, "11.11.11.9": 1}
 
 
+def test_forward_builtin_default(tmp_path, monkeypatch):
+    """内置转发清单：外部配置全缺失时仍生效（升级只换 exe，老目录无转发配置）"""
+    import ipdb
+
+    monkeypatch.setattr(ipdb, "FORWARD_IP_NETWORKS", [])
+    monkeypatch.setattr(ipdb, "FORWARD_IP_LABELS", {})
+    monkeypatch.setattr(ipdb, "_find_file", lambda name: str(tmp_path / "none.ini"))
+
+    n = ipdb._load_forward_builtin()
+    assert n >= 1
+    assert ipdb.is_forward_ip("11.11.11.2")
+    assert ipdb.is_forward_ip("11.11.11.200")
+    assert not ipdb.is_forward_ip("8.8.8.8")
+    assert ipdb.forward_ip_label("11.11.11.2") == "防火墙地址转发"
+
+
+def test_forward_builtin_disabled_by_config(tmp_path, monkeypatch):
+    """内置转发清单：config 显式 ignore_builtin_forward = true 时不加载"""
+    import ipdb
+
+    cfg = tmp_path / "config.ini"
+    cfg.write_text("[network]\nignore_builtin_forward = true\n", encoding="utf-8")
+    monkeypatch.setattr(ipdb, "FORWARD_IP_NETWORKS", [])
+    monkeypatch.setattr(ipdb, "FORWARD_IP_LABELS", {})
+    monkeypatch.setattr(ipdb, "_find_file", lambda name: str(cfg))
+
+    assert ipdb._load_forward_builtin() == 0
+    assert not ipdb.is_forward_ip("11.11.11.2")
+
+
 def test_extract_source_ips_missing_cols(tmp_path):
     """缺源/目的 IP 列 → 返回空"""
     import pandas as pd

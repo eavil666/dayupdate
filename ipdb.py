@@ -153,6 +153,15 @@ def _auto_load_excluded_ips():
 # 日志里的"源 IP"记录的是 NAT 转换后的转发地址，真实攻击源被掩盖。
 # 这类地址若计入攻击源统计，会把"多源扫描"误判为"单源猛攻"，研判方向失真。
 # 因此单独识别、单独说明，不计入外网攻击源、不作为封禁依据。
+#
+# 内置默认转发地址：必须内置，不能只依赖外部配置。
+# 原因：程序升级只替换 exe，用户目录里既有的 业务ip.xlsx / config.ini 不会被更新，
+# 且这两者优先级高于打包内置的同名文件；一旦外部文件没有转发地址配置，
+# NAT 判定会静默失效，转发地址会被当成真实攻击源重现"单源猛攻"的错误研判。
+# 需要调整：直接改这里，或用 业务ip.xlsx[转发地址] / config.ini [network] forward_ips 追加。
+# 需要禁用：config.ini [network] ignore_builtin_forward = true
+BUILTIN_FORWARD_NETWORKS = ["11.11.11.0/24"]
+
 FORWARD_IP_NETWORKS = []  # 转发地址清单（ip_address / ip_network）
 FORWARD_IP_LABELS = {}  # IP -> 说明（来自 业务ip.xlsx）
 _AUTO_FORWARD_LOADED = False
@@ -187,6 +196,33 @@ def _forward_spec_to_networks(spec):
     except ValueError:
         _log(f"[!] 跳过无效转发地址: {spec}")
         return []
+
+
+def _load_forward_builtin():
+    """加载内置转发地址清单（始终生效，除非 config 显式禁用）"""
+    global FORWARD_IP_NETWORKS, FORWARD_IP_LABELS
+    if not BUILTIN_FORWARD_NETWORKS:
+        return 0
+    cfg_path = _find_file("config.ini")
+    if cfg_path and os.path.exists(cfg_path):
+        try:
+            cfg = configparser.ConfigParser()
+            cfg.read(cfg_path, encoding="utf-8")
+            if cfg.getboolean("network", "ignore_builtin_forward", fallback=False):
+                _log("[+] 已按 config 设置禁用内置转发地址清单")
+                return 0
+        except Exception:
+            pass
+    count = 0
+    for spec in BUILTIN_FORWARD_NETWORKS:
+        nets = _forward_spec_to_networks(spec)
+        if not nets:
+            continue
+        FORWARD_IP_NETWORKS.extend(nets)
+        for net in nets:
+            FORWARD_IP_LABELS.setdefault(str(net), "防火墙地址转发")
+        count += 1
+    return count
 
 
 def _load_forward_from_excel(excel_path=None):
@@ -273,7 +309,7 @@ def _load_forward_from_config(config_path=None):
 
 
 def load_forward_ips(excel_path=None):
-    """加载转发地址清单：业务ip.xlsx[转发地址] sheet 优先，config [network] forward_ips 合并。
+    """加载转发地址清单：内置默认 + 业务ip.xlsx[转发地址] + config [network] forward_ips。
 
     幂等（仅首次生效），避免重复 append。
     """
@@ -281,10 +317,14 @@ def load_forward_ips(excel_path=None):
     if _AUTO_FORWARD_LOADED:
         return len(FORWARD_IP_NETWORKS)
     _AUTO_FORWARD_LOADED = True
+    n_builtin = _load_forward_builtin()
     n_excel = _load_forward_from_excel(excel_path)
     n_cfg = _load_forward_from_config()
     if FORWARD_IP_NETWORKS:
-        _log(f"[+] 转发地址(NAT)清单生效: {len(FORWARD_IP_NETWORKS)} 条（Excel {n_excel} / config {n_cfg}）")
+        _log(
+            f"[+] 转发地址(NAT)清单生效: {len(FORWARD_IP_NETWORKS)} 条"
+            f"（内置 {n_builtin} / Excel {n_excel} / config {n_cfg}）"
+        )
     return len(FORWARD_IP_NETWORKS)
 
 
