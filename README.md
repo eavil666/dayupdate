@@ -118,6 +118,7 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 | `_runtime_hook.py` | 26 | PyInstaller 运行时 hook（numpy/pandas DLL 路径 + certifi CA） |
 | `tools/threat-intel/threat_db.py` | 237 | 云端建库：5 源下载重建 db.json（`updated_at` 为首个键） |
 | `tools/threat-intel/upload_intel.py` | 197 | 云端发布：上传固定 tag `threat-intel-latest` asset（全源失败拒绝发布护栏） |
+| `tools/release_rest.py` | 400 | 受限环境发布：tag/Release/asset 全走 REST，full-sha 推送，幂等 + 重试 + 发布后验证 |
 | `tests/` | 1294 | pytest：threat_check / business / report / updater / update_e2e / common |
 
 ---
@@ -151,7 +152,7 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 ## 五、发布与更新链路
 
 ```
-发布（本机，release.py main）
+发布（本机用 release.py；受限环境用 tools/release_rest.py，两者步骤一致）
   读版本 → 升版(main.py APP_VERSION + pyproject) → PyInstaller 构建 exe
   → calc_md5 → 更新 version.json → git commit/tag/push
   → GitHub REST API 建 Release + 上传 asset（EXE_NAME_GH 英文名）
@@ -163,6 +164,16 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 ```
 
 **双链路解耦**（2026-09-02 起）：本地 8:30 自动化=纯本地建库+在线源健康检查（喂 MCP）；云端 Actions=建库+发布（喂 exe 下载端）。
+
+**两套发布入口的分工**：`release.py` 面向正常终端环境（可直接 `git tag -a` 与按分支推送）；`tools/release_rest.py` 面向受限环境（沙箱/写盘受限，本地 tag 与分支 ref 不落盘），把 tag → Release → asset 全部改走 GitHub REST，推送改用 `git push origin <full-sha>:refs/heads/<branch>`，并对 5xx/429 重试、对已存在的 tag ref / Release / asset 做幂等处理。版本读取、version.json 同步、token 加载复用 `release.py`，避免两份实现漂移。
+
+```bash
+python tools/release_rest.py --dry-run                # 预检 + 打印发布计划，不写任何东西
+python tools/release_rest.py --build --commit-push    # 全流程：打包 → 同步 version.json → 提交推送 → 发布 → 验证
+python tools/release_rest.py                          # 只重发现有 dist 产物（适合补传 asset）
+```
+
+asset 上传采用「**临时名先上传，成功后再删旧 asset 并改名**」的安全替换：直接「先删后传」一旦上传遇到 502，Release 会在两个动作之间失去 exe、下载链接直接断供（2026-09-16 实际踩过一次）。
 
 ---
 
