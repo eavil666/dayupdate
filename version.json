@@ -1,13 +1,13 @@
 {
-  "version": "1.8.2",
+  "version": "1.8.3",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.8.2/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.2/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.2/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.2/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.2/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.8.3/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.3/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.3/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.3/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.3/daily-report.exe"
   ],
-  "md5": "137624999A6AF3D1ADED654DAB498A85",
-  "release_note": "v1.8.2 修复更新：\n- 修复升级后 NAT 转发地址判定失效：转发地址清单新增内置默认值，不再依赖用户目录里的旧 业务ip.xlsx / config.ini（程序升级只替换 exe，旧配置不会被更新，导致老用户升级后防火墙转发地址被当成真实攻击源，重现「单源猛攻」的错误研判）\n- config.ini 新增 forward_ips（追加转发地址）与 ignore_builtin_forward（禁用内置项）两项配置说明\n- 补充内置转发清单相关单元测试",
+  "md5": "2167C5AACC54B40044E88DE8C7200ED7",
+  "release_note": "v1.8.3 修复更新：\n- 修复日报「威胁等级分布（内网 / 外网）」图表数值标签被图例遮挡：内网数量最大的那一列（如 695）只显示前两位数字的问题\n- 根因是最高柱的数值标签与左上角图例色块重叠，凡是某一列数量远超其他列都会复现\n- 修复方式：图表顶部预留 12% 空间、图例移至右上角、数值标签限制在绘图区内、数量极少的柱体保留最小可见高度\n- 攻击类型分布图不受影响",
   "force_update": false
 }

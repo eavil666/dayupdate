@@ -109,6 +109,8 @@ def load_and_classify(paths, conf):
 
 
 LEVELS = ["严重", "高危", "中危", "低危"]
+# 柱状图最小可见高度：数量极少的柱体按比例算不足 1px，直接画会"看不着"
+MIN_BAR_H = 3
 
 
 def analyze(df):
@@ -360,39 +362,59 @@ def _render_level_chart(stats, save_path):
         d.line([(margin_l, margin_t), (margin_l, H - margin_b)], fill="black", width=1)
         d.line([(margin_l, H - margin_b), (W - margin_r, H - margin_b)], fill="black", width=1)
 
-        max_val = max(max(int_vals), max(ext_vals), 1)
+        # 顶部预留 12% 余量：最高柱加满高度时数值标签会顶到标题区，留白后标签始终在绘图区内
+        max_val = max(max(int_vals), max(ext_vals), 1) * 1.12
         n = len(levels)
         group_w = plot_w / n
         bar_w = min(22, group_w * 0.28)
+        # 数值标签最低允许的 y，避免极高柱的标签被标题/图例压住
+        label_top = margin_t + 10
+
+        def _label_y(top_y):
+            """柱顶 y -> 标签 y：默认在柱顶上方 14px，并夹在绘图区内。"""
+            return max(min(top_y - 14, H - margin_b - 10), label_top)
 
         for i, lv in enumerate(levels):
             cx = margin_l + group_w * i + group_w / 2
             # 内网柱（蓝）
             iv = int_vals[i]
-            ih = plot_h * iv / max_val
+            ih = max(plot_h * iv / max_val, MIN_BAR_H) if iv > 0 else 0
             d.rectangle(
                 [cx - bar_w - 2, H - margin_b - ih, cx - 2, H - margin_b],
                 fill="#4472C4",
             )
             if iv > 0:
-                d.text((cx - bar_w / 2 - 2, H - margin_b - ih - 14), str(iv), font=f_axis, fill="#4472C4", anchor="mm")
+                d.text(
+                    (cx - bar_w / 2 - 2, _label_y(H - margin_b - ih)),
+                    str(iv),
+                    font=f_axis,
+                    fill="#4472C4",
+                    anchor="mm",
+                )
             # 外网柱（红）
             ev = ext_vals[i]
-            eh = plot_h * ev / max_val
+            eh = max(plot_h * ev / max_val, MIN_BAR_H) if ev > 0 else 0
             d.rectangle(
                 [cx + 2, H - margin_b - eh, cx + bar_w + 2, H - margin_b],
                 fill="#C00000",
             )
             if ev > 0:
-                d.text((cx + bar_w / 2 + 2, H - margin_b - eh - 14), str(ev), font=f_axis, fill="#C00000", anchor="mm")
+                d.text(
+                    (cx + bar_w / 2 + 2, _label_y(H - margin_b - eh)),
+                    str(ev),
+                    font=f_axis,
+                    fill="#C00000",
+                    anchor="mm",
+                )
             # 类别标签
             d.text((cx, H - margin_b + 14), lv, font=f_label, fill="black", anchor="mm")
 
-        # 图例
-        d.rectangle([margin_l, 30, margin_l + 14, 44], fill="#4472C4")
-        d.text((margin_l + 18, 37), "内网", font=f_axis, fill="black", anchor="lm")
-        d.rectangle([margin_l + 60, 30, margin_l + 74, 44], fill="#C00000")
-        d.text((margin_l + 78, 37), "外网", font=f_axis, fill="black", anchor="lm")
+        # 图例（右上角）：放在左侧会与第一组柱子、数值标签重叠，导致标签被色块遮挡
+        lx = W - margin_r - 132
+        d.rectangle([lx, 30, lx + 14, 44], fill="#4472C4")
+        d.text((lx + 18, 37), "内网", font=f_axis, fill="black", anchor="lm")
+        d.rectangle([lx + 60, 30, lx + 74, 44], fill="#C00000")
+        d.text((lx + 78, 37), "外网", font=f_axis, fill="black", anchor="lm")
 
         img.save(save_path)
         return save_path
