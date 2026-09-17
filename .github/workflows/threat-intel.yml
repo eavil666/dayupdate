@@ -26,8 +26,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      # 威胁源凭据：ThreatFox 需 abuse.ch 免费 Auth-Key。未配置该 Secret 时传入空值，
-      # threat_db.py 会把该源标记为 skip（不算失败），其余源照常建库。
+      # 威胁源凭据：ThreatFox 主通道走官方 CSV 导出，**无需凭据**（实测 2399 个去重
+      # C2 IP）；该 Secret 只在 CSV 不可达时供回退到 REST API（实测 1 天窗口仅 124 个 IP）。
+      # 未配置该 Secret 时传入空值，该源依旧正常建库，不会 skip / fail。
       - name: 下载威胁源 Feed 重建威胁情报库
         run: python tools/threat-intel/threat_db.py update
         env:

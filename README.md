@@ -17,7 +17,7 @@
 | 威胁源更新 | GUI 按钮/CLI 参数下载最新情报库；官方 GitHub + 国内加速镜像**并行测速择优**，失败自动轮换 |
 | 版本自检 | 启动后标题栏显示威胁源版本/库龄；后台轻量探测远端版本，有新版本时弹窗询问是否更新 |
 | 程序自动更新 | 从 GitHub Release 拉取新 exe（多 CDN 镜像 + MD5 校验），后台 worker 原子替换并自重启 |
-| 威胁情报云端发布 | GitHub Actions 每日 08:30 重建多源情报库（7 源，含需 Auth-Key 的 abuse.ch ThreatFox）并发布到固定 tag 的 Release asset，供各端下载；发布前有三层降级护栏 |
+| 威胁情报云端发布 | GitHub Actions 每日 08:30 重建多源情报库（7 源，全部免费免凭据下载）并发布到固定 tag 的 Release asset，供各端下载；发布前有三层降级护栏 |
 
 ---
 
@@ -116,7 +116,7 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 | `demo_chart.py` | 163 | 图表 demo（独立脚本，不入正式链路） |
 | `threat_demo.py` | 115 | 威胁分级 demo（独立脚本；**引用旧 API `check_ip` 与旧缓存名，已过时**） |
 | `_runtime_hook.py` | 26 | PyInstaller 运行时 hook（numpy/pandas DLL 路径 + certifi CA） |
-| `tools/threat-intel/threat_db.py` | 430 | 云端建库：7 源重建 db.json（`updated_at` 为首个键；多地址回退 + 重试 + bogon 过滤；ThreatFox 无 Key 则 skip） |
+| `tools/threat-intel/threat_db.py` | 430 | 云端建库：7 源重建 db.json（`updated_at` 为首个键；多地址回退 + 重试 + bogon 过滤；ThreatFox 走免凭据 CSV 导出、API 仅作回退） |
 | `tools/threat-intel/upload_intel.py` | 333 | 云端发布：上传固定 tag `threat-intel-latest` asset（三层降级护栏 + 临时名安全替换，不断供） |
 | `tools/release_rest.py` | 400 | 受限环境发布：tag/Release/asset 全走 REST，full-sha 推送，幂等 + 重试 + 发布后验证 |
 | `tests/` | 1294 | pytest：threat_check / business / report / updater / update_e2e / common |
@@ -135,7 +135,7 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 | `安全告警*.xlsx` | 输入告警数据（自动探测） |
 | `data/db.json` 或 `threat_db.json` | 本地威胁情报库（运行时生成/下载，不入库） |
 | `.env` | `GH_TOKEN`（发布用 GitHub token，不入库） |
-| GitHub Actions Secret `THREATFOX_API_KEY` | abuse.ch 免费 Auth-Key（可选）；配上才启用 ThreatFox 源，未配则该源 `skip`、其余源照常 |
+| GitHub Actions Secret `THREATFOX_API_KEY` | abuse.ch 免费 Auth-Key（**可选**，非必需）；CSV 主通道免凭据，该 Key 仅在 CSV 不可达时供 API 回退，未配不影响建库 |
 | `.github/workflows/threat-intel.yml` | 云端每日建库+发布（cron `30 0 * * *` = 北京 08:30） |
 
 > 项目约定：业务配置走 Excel、规避 `config.ini`；单数据源生成脚本（改一处全篇生效）；生成物/中间产物不入 git；`tools/threat-intel/` 为源，本地 MCP 副本（`~/.workbuddy/mcp-servers/threat-intel-mcp/`）须同步改动，两份保持一致避免行为分叉。
@@ -166,7 +166,9 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 
 **双链路解耦**（2026-09-02 起）：本地 8:30 自动化=纯本地建库+在线源健康检查（喂 MCP）；云端 Actions=建库+发布（喂 exe 下载端）。
 
-**威胁库数据源（7 源，前 6 个为「可直接下载 + 免费」Feed）**：Spamhaus DROP、blocklist.de、CINSscore、Proofpoint ET Open、FireHOL Level1、IPsum Level3，另接入 abuse.ch **ThreatFox**（C2 IOC 质量最高，需免费 Auth-Key；未配 Secret 时该源标记 `skip`、不阻塞建库）。选型依据《IP 威胁情报库分类指南》——**自动化封堵优先选可直接下载的 Feed**，纯 API 查询型（AbuseIPDB / VirusTotal / 微步在线等）用于告警富化与人工研判，不进入本链路。三个工程要点：① FireHOL / IPsum 走 jsDelivr 与 raw.githubusercontent **双地址回退**（两者可达性互补，实测本机 jsDelivr 超时而 raw 正常，单地址源一旦不可达即整源失效），Spamhaus 另有 FireHOL 镜像通道，且每地址重试 2 次（实测 Spamhaus 同一会话内先超时后成功）；② 解析时过滤私网/保留/回环/组播，避免聚合列表内置的 bogon 段把内网 IP 误判为威胁；③ 已停更的源不再收录——Spamhaus EDROP（并入 DROP）、Feodo Tracker（2026-03 起停更）、abuse.ch SSLBL（2025-01 起停更）。
+**威胁库数据源（7 源，全部「可直接下载 Feed + 免费」）**：Spamhaus DROP、blocklist.de、CINSscore、Proofpoint ET Open、FireHOL Level1、IPsum Level3，另接入 abuse.ch **ThreatFox**（C2 IOC 质量最高）。选型依据《IP 威胁情报库分类指南》——**自动化封堵优先选可直接下载的 Feed**，纯 API 查询型（AbuseIPDB / VirusTotal / 微步在线等）用于告警富化与人工研判，不进入本链路。三个工程要点：① FireHOL / IPsum 走 jsDelivr 与 raw.githubusercontent **双地址回退**（两者可达性互补，实测本机 jsDelivr 超时而 raw 正常，单地址源一旦不可达即整源失效），Spamhaus 另有 FireHOL 镜像通道，且每地址重试 2 次（实测 Spamhaus 同一会话内先超时后成功）；② 解析时过滤私网/保留/回环/组播，避免聚合列表内置的 bogon 段把内网 IP 误判为威胁；③ 已停更的源不再收录——Spamhaus EDROP（并入 DROP）、Feodo Tracker（2026-03 起停更）、abuse.ch SSLBL（2025-01 起停更）。
+
+**ThreatFox 取数通道（2026-09-17 定稿）**：**主通道 = 官方 CSV 导出**（`threatfox.abuse.ch/export/csv/recent/`，48h 窗口），**不需要任何凭据**；`THREATFOX_API_KEY`（免费 Auth-Key）降为 **CSV 不可达时的回退通道**。实测对比：CSV 2399 个去重 C2 IP（耗时 40s~640s，波动大）vs API 1 天窗口 124~183 个 IP（26s），覆盖差 13 倍以上，且 API 多日窗口会被服务端截断（days=2 约 200s 断连、days=3/7 直接超时），`date` 参数被服务端忽略。两个通道都失败才记 fail，**无 Secret 的环境该源照常可用**。另有一个隐蔽坑：API 取列表的操作名是 `get_iocs`（复数），写成 `get_ioc`（单 IOC 反查）会返回 `query_status=unknown_operation` 但 **HTTP 仍是 200**，极易被当成正常响应而让整源静默为空。
 
 **威胁库发布护栏（三层，2026-09-17 起）**：`upload_intel.py` 在发布前逐层校验，任一不过即拒绝并保留线上旧库——① 库不完整（`total_ips` 或 `total_cidrs` 为 0）；② 成功源不足半数（`skip` 既不算成功也不算失败）；③ 与线上现有库比对，精确 IP 或恶意段跌幅超过 30%。紧急放行用 `INTEL_FORCE_PUBLISH=1`。覆盖 asset 采用**临时名先上传、成功后再删旧库并改名**的安全替换：直接「先删后传」一旦上传遇 502，线上库会在两个动作之间消失、exe 端全体断供（2026-09-16 在正式版 Release 上实际踩过一次）。
 
