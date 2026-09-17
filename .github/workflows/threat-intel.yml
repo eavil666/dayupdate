@@ -26,8 +26,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: 下载 5 源重建威胁情报库
+      # 威胁源凭据：ThreatFox 需 abuse.ch 免费 Auth-Key。未配置该 Secret 时传入空值，
+      # threat_db.py 会把该源标记为 skip（不算失败），其余源照常建库。
+      - name: 下载威胁源 Feed 重建威胁情报库
         run: python tools/threat-intel/threat_db.py update
+        env:
+          THREATFOX_API_KEY: ${{ secrets.THREATFOX_API_KEY }}
 
       # 发布到固定 tag Release asset（供日报 exe 下载）
       # Token：GITHUB_TOKEN 不会自动注入 step 环境变量，必须显式映射 ${{ github.token }}
