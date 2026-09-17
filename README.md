@@ -17,7 +17,7 @@
 | 威胁源更新 | GUI 按钮/CLI 参数下载最新情报库；官方 GitHub + 国内加速镜像**并行测速择优**，失败自动轮换 |
 | 版本自检 | 启动后标题栏显示威胁源版本/库龄；后台轻量探测远端版本，有新版本时弹窗询问是否更新 |
 | 程序自动更新 | 从 GitHub Release 拉取新 exe（多 CDN 镜像 + MD5 校验），后台 worker 原子替换并自重启 |
-| 威胁情报云端发布 | GitHub Actions 每日 08:30 重建 5 源情报库并发布到固定 tag 的 Release asset，供各端下载 |
+| 威胁情报云端发布 | GitHub Actions 每日 08:30 重建多源情报库（7 个免费可下载 Feed）并发布到固定 tag 的 Release asset，供各端下载 |
 
 ---
 
@@ -92,7 +92,7 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 
 | 层 | 触发 | 口径 |
 |---|---|---|
-| 本地库 `threat_db.json` | 库存在 | `match_ip`：精确 IP + CIDR 恶意段（1,709 段） |
+| 本地库 `threat_db.json` | 库存在 | `match_ip`：精确 IP + CIDR 恶意段（多源聚合，段数与 IP 数随每日重建变化） |
 | Legacy 3 源缓存 | 无库且本地缓存有效 | `load_bad_ips`（6h TTL，精确匹配） |
 | 联网兜底 | 无库无缓存 | 运行期下载 3 源（慢、慎用） |
 
@@ -116,7 +116,7 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
 | `demo_chart.py` | 163 | 图表 demo（独立脚本，不入正式链路） |
 | `threat_demo.py` | 115 | 威胁分级 demo（独立脚本；**引用旧 API `check_ip` 与旧缓存名，已过时**） |
 | `_runtime_hook.py` | 26 | PyInstaller 运行时 hook（numpy/pandas DLL 路径 + certifi CA） |
-| `tools/threat-intel/threat_db.py` | 237 | 云端建库：5 源下载重建 db.json（`updated_at` 为首个键） |
+| `tools/threat-intel/threat_db.py` | 332 | 云端建库：7 源下载重建 db.json（`updated_at` 为首个键；多地址回退 + 重试 + bogon 过滤） |
 | `tools/threat-intel/upload_intel.py` | 197 | 云端发布：上传固定 tag `threat-intel-latest` asset（全源失败拒绝发布护栏） |
 | `tools/release_rest.py` | 400 | 受限环境发布：tag/Release/asset 全走 REST，full-sha 推送，幂等 + 重试 + 发布后验证 |
 | `tests/` | 1294 | pytest：threat_check / business / report / updater / update_e2e / common |
@@ -157,13 +157,15 @@ generate_daily_report(files, date, work_summary, follow_items, intel_items)
   → calc_md5 → 更新 version.json → git commit/tag/push
   → GitHub REST API 建 Release + 上传 asset（EXE_NAME_GH 英文名）
 情报库发布（云端，GitHub Actions 每日 08:30）
-  threat_db.py（5 源）→ db.json → upload_intel.py → threat-intel-latest asset
+  threat_db.py（7 源 Feed）→ db.json → upload_intel.py → threat-intel-latest asset
 消费端
   exe【威胁源更新】按钮 / --update-intel → 多源择优下载覆盖本地
   exe 自动更新 → GitHub Release latest + version.json（MD5 校验 → worker 覆盖重启）
 ```
 
 **双链路解耦**（2026-09-02 起）：本地 8:30 自动化=纯本地建库+在线源健康检查（喂 MCP）；云端 Actions=建库+发布（喂 exe 下载端）。
+
+**威胁库数据源（7 源，均为「可直接下载 + 免费」类）**：Spamhaus DROP、blocklist.de、CINSscore、Feodo Tracker、Proofpoint ET Open、FireHOL Level1、IPsum Level3。选型依据《IP 威胁情报库分类指南》——**自动化封堵优先选可直接下载的 Feed**，API 查询型（AbuseIPDB / VirusTotal / 微步在线等）用于告警富化与人工研判，不进入本链路。两条工程要点：① FireHOL / IPsum 走 jsDelivr 与 raw.githubusercontent **双地址回退**（两者可达性互补，实测本机 jsDelivr 超时而 raw 正常，单地址源一旦不可达即整源失效）；② 解析时过滤私网/保留/回环/组播，避免聚合列表内置的 bogon 段把内网 IP 误判为威胁。
 
 **两套发布入口的分工**：`release.py` 面向正常终端环境（可直接 `git tag -a` 与按分支推送）；`tools/release_rest.py` 面向受限环境（沙箱/写盘受限，本地 tag 与分支 ref 不落盘），把 tag → Release → asset 全部改走 GitHub REST，推送改用 `git push origin <full-sha>:refs/heads/<branch>`，并对 5xx/429 重试、对已存在的 tag ref / Release / asset 做幂等处理。版本读取、version.json 同步、token 加载复用 `release.py`，避免两份实现漂移。
 

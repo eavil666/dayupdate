@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: 下载 5 源重建威胁情报库
+      - name: 下载威胁源 Feed 重建威胁情报库
         run: python tools/threat-intel/threat_db.py update
 
       # 发布到固定 tag Release asset（供日报 exe 下载）
