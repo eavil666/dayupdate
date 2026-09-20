@@ -286,3 +286,91 @@ def test_render_example_placeholder_not_in_docx(tmp_path):
     text = "\n".join(p.text for p in d.paragraphs)
     for leaked in ("完成防火墙规则优化", "处置高危漏洞告警", "CVE-2024-XXXX"):
         assert leaked not in text, f"示例内容泄漏进日报正文: {leaked}"
+
+
+def _docx_table_after(docx_path, heading_prefix):
+    """取出某个一级标题之后的第一张表格（返回二维文本列表）"""
+    import re as _re
+
+    import docx as docxlib
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    d = docxlib.Document(str(docx_path))
+    hit = False
+    for child in d.element.body.iterchildren():
+        if child.tag.endswith("}p"):
+            t = Paragraph(child, d).text.strip()
+            if t.startswith(heading_prefix):
+                hit = True
+                continue
+            if hit and _re.match(r"^[一二三四五六七八九十]+、", t):
+                break
+        elif child.tag.endswith("}tbl") and hit:
+            tb = Table(child, d)
+            return [[c.text.strip() for c in r.cells] for r in tb.rows]
+    return None
+
+
+def test_key_events_serial_number_is_sequential(tmp_path):
+    """八、重点事件研判：序号必须是连续行号，不得按「事件名称」共用编号。
+
+    回归：历史实现用 evt_name_map 按事件名称编号（同一事件共用同一个号），
+    但 grp 只按 count 降序排、同一事件的行被其他攻击穿插，序号出现
+    1,1,2,1,2 的重复乱序（2026-09-17 用户在日报成品中发现）。
+
+    选行口径保持不变：仍按攻击次数降序取前 top 条（混合事件，突出最热源地址）。
+    """
+    from report import LEVELS, render
+
+    conf = {
+        "title": "测试日报",
+        "retention": 180,
+        "top": 5,
+        "crit_levels": {"严重", "高危"},
+        "probes": [],
+    }
+    # 两事件交错、次数互不相等（避免排序并列导致断言不稳定）：
+    # 感染蠕虫病毒 5/3、ICMP水平扫描 4/2
+    pairs = (
+        [("感染蠕虫病毒", "10.0.0.5")] * 5
+        + [("感染蠕虫病毒", "10.0.0.8")] * 3
+        + [("ICMP水平扫描", "10.0.0.53")] * 4
+        + [("ICMP水平扫描", "10.0.0.238")] * 2
+    )
+    df = pd.DataFrame(
+        {
+            "攻击名称": [a for a, _ in pairs],
+            "源IP": [s for _, s in pairs],
+            "威胁等级": ["高危"] * len(pairs),
+            "网络类型": ["内网"] * len(pairs),
+            "目的IP": ["10.1.0.1"] * len(pairs),
+        }
+    )
+    stats = {
+        "total": len(pairs),
+        "int_count": len(pairs),
+        "ext_count": 0,
+        "ban_count": 0,
+        "int_level": {lv: 0 for lv in LEVELS},
+        "ext_level": {lv: 0 for lv in LEVELS},
+        "internal": df,
+        "external": df.iloc[0:0],
+    }
+    out = tmp_path / "report.docx"
+    render(conf, df, stats, conf["probes"], [], "20260719", str(out))
+
+    table = _docx_table_after(out, "八、")
+    assert table is not None, "未找到「八、重点事件研判」下的表格"
+    assert table[0] == ["序号", "事件名称", "源地址", "攻击次数"]
+    data = table[1:]
+
+    # 序号是连续行号 1..N
+    assert [r[0] for r in data] == ["1", "2", "3", "4"]
+    # 选行口径：按攻击次数降序（跨事件混合）
+    assert [r[3] for r in data] == ["5", "4", "3", "2"]
+    assert [r[2] for r in data] == ["10.0.0.5", "10.0.0.53", "10.0.0.8", "10.0.0.238"]
+    # 关键回归点：同一事件出现多次，但序号各不相同（不再共用同一个编号）
+    names = [r[1] for r in data]
+    assert names == ["感染蠕虫病毒", "ICMP水平扫描", "感染蠕虫病毒", "ICMP水平扫描"]
+    assert len(set(r[0] for r in data)) == len(data)

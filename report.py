@@ -836,12 +836,18 @@ def render(
         key["_p"] = key["威胁等级"].map({lv: i for i, lv in enumerate(LEVELS)})
         key = key.sort_values("_p")
         grp = key.groupby(["攻击名称", "源IP"], sort=False).size().reset_index(name="count")
-        grp = grp.sort_values("count", ascending=False).head(conf["top"])
-        evt_name_map = {}
-        for idx, row in enumerate(grp[["攻击名称"]].drop_duplicates().values, 1):
-            evt_name_map[row[0]] = idx
+        # 选行口径保持「按攻击次数降序取前 top 条」（混合事件，突出最热源地址）；
+        # 序号则必须是**连续行号**，与全文其他表格一致。
+        # 历史实现按「事件名称」编号并让同一事件共用同一个号（evt_name_map），
+        # 而 grp 只按 count 降序排、同一事件的行被其他攻击穿插，
+        # 序号因此出现 1,1,2,1,2 的重复乱序（2026-09-17 用户在日报成品中发现）。
+        # 注：若改为「按事件合计降序」使同事件相邻，会让合计次数最大的单一事件
+        # 占满前 top 行、挤掉其余事件（实测「端口水平扫描」1638 次吃掉全部 5 行），
+        # 故不采用该排序。
+        grp = grp.sort_values("count", ascending=False, kind="mergesort").head(conf["top"])
         key_rows = [
-            (evt_name_map[row["攻击名称"]], row["攻击名称"], row["源IP"], row["count"]) for _, row in grp.iterrows()
+            (i, row["攻击名称"], row["源IP"], row["count"])
+            for i, (_, row) in enumerate(grp.iterrows(), 1)
         ]
         _add_table(doc, ["序号", "事件名称", "源地址", "攻击次数"], [41, 145, 135, 121], key_rows)
     else:
