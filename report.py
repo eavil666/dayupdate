@@ -751,22 +751,28 @@ def render(
     else:
         _add_para(doc, "今日无内网外联行为。")
 
-    # 七、攻击面聚焦（攻击源网段 / 被攻击目标 / 情报IOC）
+    # 七、攻击面聚焦（攻击源 IP / 被攻击目标 / 情报IOC）
     _add_heading(doc, "七、攻击面聚焦", 1)
-    # ① 攻击源 /24 网段聚合（呼应周报"哪些 IP 段在扫"）
-    _add_heading(doc, "1. 攻击源网段聚焦（/24）", 2)
+    # ① 攻击源 IP 聚焦：直接列具体 IP（不做 /24 聚合），便于逐条封禁与回溯
+    _add_heading(doc, "1. 攻击源 IP 聚焦（Top 20）", 2)
     if len(ext) > 0:
-        _ext2 = ext.copy()
-        _ext2["网段"] = _ext2["源IP"].astype(str).apply(lambda x: ".".join(str(x).split(".")[:3]) + ".x")
-        _seg = (
-            _ext2.groupby("网段")
-            .agg(命中=("源IP", "size"), 源数=("源IP", "nunique"))
+        # 先按 (源IP, 攻击名称) 计数并降序排，同一 IP 的首条即其最主要的攻击类型；
+        # 再按各 IP 的命中合计取前 20。排序统一 mergesort，保证并列时行序可复现。
+        _pair = ext.groupby(["源IP", "攻击名称"]).size().reset_index(name="次数")
+        _pair = _pair.sort_values(["次数", "源IP"], ascending=[False, True], kind="mergesort")
+        _ip_total = (
+            _pair.groupby("源IP")["次数"]
+            .sum()
             .reset_index()
-            .sort_values("命中", ascending=False)
-            .head(8)
+            .sort_values(["次数", "源IP"], ascending=[False, True], kind="mergesort")
+            .head(20)
         )
-        _seg_rows = [(i, r["网段"], int(r["命中"]), int(r["源数"])) for i, (_, r) in enumerate(_seg.iterrows(), 1)]
-        _add_table(doc, ["序号", "网段", "命中次数", "源IP数"], [41, 121, 71, 71], _seg_rows)
+        _name_map = _pair.drop_duplicates("源IP").set_index("源IP")["攻击名称"]
+        _src_rows = [
+            (i, r["源IP"], str(_name_map.get(r["源IP"], ""))[:22], int(r["次数"]))
+            for i, (_, r) in enumerate(_ip_total.iterrows(), 1)
+        ]
+        _add_table(doc, ["序号", "攻击源IP", "主要攻击类型", "命中次数"], [41, 111, 147, 71], _src_rows)
     else:
         _add_para(doc, "（无外网告警）")
     # ② 被攻击目标 Top（目的 IP 被攻击最多，含内外网；排除公共 DNS）
