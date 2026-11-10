@@ -775,8 +775,8 @@ def render(
         _add_table(doc, ["序号", "攻击源IP", "主要攻击类型", "命中次数"], [41, 111, 147, 71], _src_rows)
     else:
         _add_para(doc, "（无外网告警）")
-    # ② 被攻击目标 Top（目的 IP 被攻击最多，含内外网；排除公共 DNS）
-    _add_heading(doc, "2. 被攻击目标 Top", 2)
+    # ② 被攻击目标 Top 10（目的 IP 被攻击最多，含内外网；排除公共 DNS）
+    _add_heading(doc, "2. 被攻击目标 Top 10", 2)
     _public_dns = {
         "114.114.114.114", "223.5.5.5", "8.8.8.8", "8.8.4.4",
         "1.1.1.1", "119.29.29.29", "180.76.76.76",
@@ -789,16 +789,16 @@ def render(
             _tgt.groupby(["目的IP", "类型"])
             .agg(次数=("目的IP", "size"))
             .reset_index()
-            .sort_values("次数", ascending=False)
-            .head(8)
+            .sort_values(["次数", "目的IP"], ascending=[False, True], kind="mergesort")
+            .head(10)
         )
         _tgt_rows = [(i, r["目的IP"], r["类型"], int(r["次数"])) for i, (_, r) in enumerate(_tgrp.iterrows(), 1)]
         _add_table(doc, ["序号", "目标IP", "类型", "被攻击次数"], [41, 121, 71, 91], _tgt_rows)
     else:
         _add_para(doc, "（无目的IP数据）")
-    # ③ 情报IOC命中（告警"情报IOC"列有值的，情报平台实锤）
+    # ③ 情报IOC命中 Top 10（告警"情报IOC"列有值的，情报平台实锤）
     # 注意：该列为可选列（仅当天存在情报类告警文件时 load_data 才建），缺失时置空表走无命中分支
-    _add_heading(doc, "3. 情报IOC命中", 2)
+    _add_heading(doc, "3. 情报IOC命中 Top 10", 2)
     _ioc = df[df["情报IOC"].notna()].copy() if "情报IOC" in df.columns else df.iloc[0:0].copy()
     if len(_ioc) > 0:
         _ioc = _ioc[_ioc["情报IOC"].astype(str).str.strip() != ""]
@@ -810,8 +810,8 @@ def render(
             _ioc.groupby(["源IP", "攻击名称", "情报IOC"])
             .size()
             .reset_index(name="次数")
-            .sort_values("次数", ascending=False)
-            .head(8)
+            .sort_values(["次数", "源IP", "情报IOC"], ascending=[False, True, True], kind="mergesort")
+            .head(10)
         )
         _ioc_rows = [
             (
