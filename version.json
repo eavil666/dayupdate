@@ -1,13 +1,13 @@
 {
-  "version": "1.8.4",
+  "version": "1.8.5",
   "exe_urls": [
-    "https://github.com/eavil666/dayupdate/releases/download/v1.8.4/daily-report.exe",
-    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.4/daily-report.exe",
-    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.4/daily-report.exe",
-    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.4/daily-report.exe",
-    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.4/daily-report.exe"
+    "https://github.com/eavil666/dayupdate/releases/download/v1.8.5/daily-report.exe",
+    "https://ghfast.top/https://github.com/eavil666/dayupdate/releases/download/v1.8.5/daily-report.exe",
+    "https://ghproxy.net/https://github.com/eavil666/dayupdate/releases/download/v1.8.5/daily-report.exe",
+    "https://gh-proxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.5/daily-report.exe",
+    "https://mirror.ghproxy.com/https://github.com/eavil666/dayupdate/releases/download/v1.8.5/daily-report.exe"
   ],
-  "md5": "CFF9793EDD17AAC436850855A3C25C7F",
-  "release_note": "v1.8.4 修复更新：\n- 修复日报「八、重点事件研判」表格序号重复乱序：原按「事件名称」编号、同一事件的多行共用一个号，而这些行在按攻击次数降序排列时彼此不相邻，序号因此出现 1,1,2,1,2 的错乱\n- 现改为连续行号 1..N，与日报其余表格（外网 / 内网 / 外联 / 网段 / 目标 IP / 情报 IOC）口径一致\n- 同次数的行排序稳定化：同一份告警数据每次生成的日报行序完全一致",
+  "md5": "21C0746A698783EBCDC1967D89F2C268",
+  "release_note": "v1.8.5 更新：调整日报「七、攻击面聚焦」\n\n1. 「攻击源网段聚焦（/24）」改为「攻击源 IP 聚焦（Top 20）」\n   - 不再按 /24 聚合，直接列出具体攻击源 IP，按命中次数降序取前 20\n   - 新增「主要攻击类型」列：显示该 IP 命中次数最高的攻击类型\n   - 输出可直接用于逐条封禁，也能回溯到具体地址\n\n2. 「被攻击目标 Top」由前 8 扩大到前 10\n\n3. 「情报 IOC 命中」由前 8 条扩大到前 10 条\n\n另：三节排序均补了次级排序键（目标 IP / 源 IP / IOC 域名），命中次数并列时行序固定，\n同一批告警数据每次生成的日报完全一致。\n\n升级后重新生成日报即可生效。",
   "force_update": false
 }
